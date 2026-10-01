@@ -1,0 +1,18 @@
+{
+  "name": "toolstorm",
+  "description": "TOOLSTORM: a terminal arcade shooter fueled by Claude Code's own tool calls.",
+  "owner": {
+    "name": "Rohith A"
+  },
+  "plugins": [
+    {
+      "name": "toolstorm",
+      "description": "A playable arcade shooter in its own terminal pane, fed by this session's real tool calls, with a live score HUD in Claude's status line.",
+      "author": {
+        "name": "Rohith A"
+      },
+      "category": "productivity",
+      "source": "./"
+    }
+  ]
+}
