@@ -1,1 +1,1 @@
-# just-rubiks-cube
+# claude-code-game
