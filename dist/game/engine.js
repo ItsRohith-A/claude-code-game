@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Engine = exports.ENEMY_SPECS = void 0;
+exports.Engine = exports.MOVE_STEP = exports.ENEMY_SPECS = void 0;
 exports.glyphFor = glyphFor;
 exports.colorFor = colorFor;
 const events_1 = require("../events");
@@ -17,16 +17,18 @@ const INVULN_TIME = 1.4;
 const COMBO_WINDOW = 3.0;
 /** With no events arriving, trickle in targets so the game stands on its own. */
 const IDLE_SPAWN_DELAY = 2.4;
-/** Events that prove Claude is working again, which clears the attention banner. */
-const RESUMING_EVENTS = new Set([
-    "tool_pending",
-    "bug",
-    "scout",
-    "probe",
-    "powerup",
-    "turn_start",
-    "wave_clear",
-]);
+/** Cells the ship moves per key press; auto-repeat makes a held key glide. */
+exports.MOVE_STEP = 2;
+/** Tool results: proof Claude is working, which may clear the attention banner. */
+const WORK_EVENTS = new Set(["bug", "scout", "probe", "powerup", "damage"]);
+/** A turn starting or ending always means the human has answered. */
+const TURN_EVENTS = new Set(["turn_start", "wave_clear"]);
+/**
+ * Hooks run concurrently, so a tool that finished just before the permission
+ * prompt can land after it. Unrelated work only clears the banner once it is
+ * clearly newer than the prompt.
+ */
+const ATTENTION_SETTLE_MS = 1500;
 class Engine {
     width;
     height;
@@ -38,6 +40,9 @@ class Engine {
     status = "playing";
     /** Why the game is showing the attention banner. */
     attentionNote = "";
+    /** The tool call the banner is waiting on, and when the banner went up. */
+    attentionId;
+    attentionAt = 0;
     enemies = [];
     bullets = [];
     enemyBullets = [];
@@ -105,19 +110,23 @@ class Engine {
                 }
                 break;
             case "left":
-                this.moveBy(-2);
+                this.moveBy(-exports.MOVE_STEP);
                 break;
             case "right":
-                this.moveBy(2);
+                this.moveBy(exports.MOVE_STEP);
                 break;
             default:
                 break;
         }
     }
     moveBy(cells) {
+        this.moveTo(this.playerX + cells);
+    }
+    /** Put the ship at a field column, as the mouse pointer does. */
+    moveTo(x) {
         if (this.status !== "playing")
             return;
-        this.playerX = Math.max(1, Math.min(this.width - 2, this.playerX + cells));
+        this.playerX = Math.max(1, Math.min(this.width - 2, Math.round(x)));
     }
     // ------------------------------------------------------------ game feed ---
     /** Translate one real Claude Code event into something on screen. */
@@ -125,9 +134,9 @@ class Engine {
         const tool = event.tool ?? "";
         const label = event.label;
         const weight = Math.max(1, Math.min(6, event.weight ?? 1));
-        // Claude only resumes calling tools once the human has answered the
-        // prompt that interrupted us, so any work event clears the banner.
-        if (this.status === "attention" && RESUMING_EVENTS.has(event.kind)) {
+        // Claude only resumes once the human has answered the prompt that
+        // interrupted us, so the right kind of event clears the banner.
+        if (this.status === "attention" && this.resumes(event)) {
             this.status = "playing";
             this.invulnTime = Math.max(this.invulnTime, 1.0);
         }
@@ -138,11 +147,6 @@ class Engine {
             case "turn_start":
                 this.pushLog("you asked Claude to work", "white");
                 this.banner(`WAVE ${this.wave}`);
-                break;
-            case "tool_pending":
-                // Telegraph only: the enemy itself arrives on the matching post-tool.
-                if (tool)
-                    this.pushLog(`- ${tool}${label ? " " + label : ""}`, "dim");
                 break;
             case "bug":
                 for (let i = 0; i < weight; i++)
@@ -170,6 +174,8 @@ class Engine {
                 if (this.status === "playing" || this.status === "paused")
                     this.status = "attention";
                 this.attentionNote = event.label ?? "Claude needs you";
+                this.attentionId = event.id;
+                this.attentionAt = event.at;
                 break;
             case "resume":
                 if (this.status === "attention")
@@ -189,6 +195,15 @@ class Engine {
                 this.pushLog("session ended", "dim");
                 break;
         }
+    }
+    resumes(event) {
+        if (TURN_EVENTS.has(event.kind))
+            return true;
+        if (!WORK_EVENTS.has(event.kind))
+            return false;
+        if (this.attentionId && event.id === this.attentionId)
+            return true;
+        return event.at - this.attentionAt > ATTENTION_SETTLE_MS;
     }
     queueSpawn(type, label) {
         // Spread arrivals out over time instead of dumping a wall of enemies the

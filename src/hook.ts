@@ -7,24 +7,37 @@
  * hook is registered `async: true`, so this process can never add latency to
  * the user's real work, and a crash here is invisible.
  */
-import * as path from "path";
-import { classifyTool, type GameEventKind } from "./events";
-import { publish, resetLog } from "./bus";
+import {
+  classifyTool,
+  isVerificationCommand,
+  labelFor,
+} from "./events";
+import { gameIsLive, markCurrentSession, publish, resetLog } from "./bus";
+import { ensureDirs, pluginRootPointerPath, pruneSessions, writeAtomic } from "./paths";
 
 interface HookPayload {
   session_id?: string;
   hook_event_name?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
-  tool_output?: unknown;
+  tool_use_id?: string;
+  is_interrupt?: boolean;
   notification_type?: string;
   message?: string;
   source?: string;
-  turn_number?: number;
 }
 
-/** Commands whose success is worth celebrating with a power-up. */
-const VERIFICATION = /\b(test|tests|jest|vitest|pytest|mocha|go\s+test|cargo\s+test|npm\s+run|pnpm\s+run|yarn\s+(?:run|test)|make|build|tsc|lint|eslint|ruff|mypy|gradle|mvn|dotnet\s+test)\b/i;
+/** Session files untouched for this long are deleted at the next session start. */
+const SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Notifications that genuinely need the human, and so should pause the game. */
+const NEEDS_HUMAN = new Set([
+  "permission_prompt",
+  "idle_prompt",
+  "agent_needs_input",
+  "elicitation_dialog",
+  "elicitation_url_dialog",
+]);
 
 function readStdin(): Promise<string> {
   return new Promise((resolve) => {
@@ -46,26 +59,20 @@ function readStdin(): Promise<string> {
   });
 }
 
-/** A short, screen-friendly label for the thing Claude just touched. */
-function labelFor(payload: HookPayload): string | undefined {
-  const input = payload.tool_input ?? {};
-  const filePath = input["file_path"] ?? input["notebook_path"] ?? input["path"];
-  if (typeof filePath === "string" && filePath) return path.basename(filePath);
-
-  const command = input["command"];
-  if (typeof command === "string" && command) {
-    return command.trim().split(/\s+/).slice(0, 2).join(" ").slice(0, 24);
+function onSessionStart(sessionId: string, payload: HookPayload): void {
+  try {
+    ensureDirs();
+    // The status line shim reads this to find the current install, since an
+    // update moves the plugin to a new versioned directory.
+    writeAtomic(pluginRootPointerPath(), __dirname, 0o644);
+  } catch {
+    /* ignore */
   }
-
-  const pattern = input["pattern"] ?? input["query"] ?? input["url"];
-  if (typeof pattern === "string" && pattern) return pattern.slice(0, 24);
-
-  return undefined;
-}
-
-function isVerificationCommand(payload: HookPayload): boolean {
-  const command = payload.tool_input?.["command"];
-  return typeof command === "string" && VERIFICATION.test(command);
+  pruneSessions(SESSION_RETENTION_MS);
+  // A resumed session keeps its run going; a fresh or cleared one restarts.
+  if (payload.source === "startup" || payload.source === "clear") resetLog(sessionId);
+  markCurrentSession(sessionId);
+  publish(sessionId, { kind: "session_start", label: payload.source });
 }
 
 async function main(): Promise<void> {
@@ -79,62 +86,72 @@ async function main(): Promise<void> {
     payload = {};
   }
 
-  const sessionId = payload.session_id || process.env.CLAUDE_SESSION_ID || "unknown";
+  const sessionId = payload.session_id;
+  if (!sessionId) return;
+
+  if (event === "session-start") {
+    onSessionStart(sessionId, payload);
+    return;
+  }
+
+  if (event === "turn-start") markCurrentSession(sessionId);
+
+  // Nobody is playing: the game skips old lines when it attaches, so writing
+  // them would only grow a file nobody reads.
+  if (!gameIsLive(sessionId)) return;
+
   const tool = payload.tool_name;
-  const label = labelFor(payload);
+  const label = labelFor(payload.tool_input);
+  const id = payload.tool_use_id;
 
   switch (event) {
-    case "session-start": {
-      // A resumed session keeps its run going; a fresh or cleared one restarts.
-      if (payload.source === "startup" || payload.source === "clear") resetLog(sessionId);
-      publish(sessionId, { kind: "session_start", label: payload.source });
-      break;
-    }
-
     case "turn-start":
-      publish(sessionId, { kind: "turn_start", weight: payload.turn_number ?? 0 });
-      break;
-
-    case "pre-tool":
-      publish(sessionId, { kind: "tool_pending", tool, label });
+      publish(sessionId, { kind: "turn_start" });
       break;
 
     case "post-tool": {
       if (!tool) break;
       // A Bash call only earns a power-up when it actually verified something;
       // otherwise it is just another thing that moved on screen.
-      if ((tool === "Bash" || tool === "PowerShell") && !isVerificationCommand(payload)) {
-        publish(sessionId, { kind: "scout", tool, label, weight: 1 });
-        break;
+      if (tool === "Bash" || tool === "PowerShell") {
+        const command = payload.tool_input?.["command"];
+        if (typeof command !== "string" || !isVerificationCommand(command)) {
+          publish(sessionId, { kind: "scout", tool, id, label, weight: 1 });
+          break;
+        }
       }
       const { kind, weight } = classifyTool(tool, false);
-      publish(sessionId, { kind, tool, label, weight });
+      publish(sessionId, { kind, tool, id, label, weight });
       break;
     }
 
     case "post-tool-failure": {
+      // The user pressing Esc is not Claude failing: no heart lost for that.
+      if (payload.is_interrupt) break;
       const { kind, weight } = classifyTool(tool ?? "", true);
-      publish(sessionId, { kind, tool, label, weight });
+      publish(sessionId, { kind, tool, id, label, weight });
       break;
     }
 
+    case "permission-request":
+      publish(sessionId, {
+        kind: "attention",
+        tool,
+        id,
+        label: `${tool ?? "a tool"} needs your approval`,
+      });
+      break;
+
     case "notification": {
       const type = payload.notification_type ?? "";
-      // Only the notifications that genuinely need the human should steal focus.
-      const needsHuman =
-        type === "permission_prompt" ||
-        type === "idle_prompt" ||
-        type === "agent_needs_input" ||
-        type === "elicitation_dialog" ||
-        type === "elicitation_url_dialog";
-      if (needsHuman) {
+      if (NEEDS_HUMAN.has(type)) {
         publish(sessionId, { kind: "attention", label: payload.message?.slice(0, 60) });
       }
       break;
     }
 
     case "stop":
-      publish(sessionId, { kind: "wave_clear", weight: payload.turn_number ?? 0 });
+      publish(sessionId, { kind: "wave_clear" });
       break;
 
     case "session-end":

@@ -7,7 +7,10 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.js", "session-start"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.js",
+              "session-start"
+            ],
             "async": true
           }
         ]
@@ -19,19 +22,10 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.js", "turn-start"],
-            "async": true
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.js", "pre-tool"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.js",
+              "turn-start"
+            ],
             "async": true
           }
         ]
@@ -43,7 +37,10 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.js", "post-tool"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.js",
+              "post-tool"
+            ],
             "async": true
           }
         ]
@@ -55,7 +52,25 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.js", "post-tool-failure"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.js",
+              "post-tool-failure"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.js",
+              "permission-request"
+            ],
             "async": true
           }
         ]
@@ -67,7 +82,10 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.js", "notification"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.js",
+              "notification"
+            ],
             "async": true
           }
         ]
@@ -79,7 +97,10 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.js", "stop"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.js",
+              "stop"
+            ],
             "async": true
           }
         ]
@@ -91,7 +112,10 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/dist/hook.js", "session-end"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.js",
+              "session-end"
+            ],
             "async": true
           }
         ]

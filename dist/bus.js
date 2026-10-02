@@ -35,14 +35,19 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EventTail = void 0;
 exports.publish = publish;
+exports.markCurrentSession = markCurrentSession;
 exports.resetLog = resetLog;
 exports.publishState = publishState;
 exports.readState = readState;
+exports.gameIsLive = gameIsLive;
 exports.readCurrentSessionId = readCurrentSessionId;
 exports.readHighScore = readHighScore;
 exports.writeHighScore = writeHighScore;
 const fs = __importStar(require("fs"));
 const paths_1 = require("./paths");
+const events_1 = require("./events");
+/** A log past this size is restarted; the game tail notices the truncation. */
+const MAX_LOG_BYTES = 1024 * 1024;
 /**
  * Append one event. Called from hook processes, which must never fail loudly
  * and must never block Claude: every error is swallowed on purpose.
@@ -51,23 +56,33 @@ function publish(sessionId, event) {
     try {
         (0, paths_1.ensureDirs)();
         const log = (0, paths_1.eventLogPath)(sessionId);
-        const seq = Date.now() * 1000 + Math.floor(Math.random() * 1000);
-        const line = JSON.stringify({ seq, at: Date.now(), ...event }) + "\n";
-        // A single appendFileSync of a short line is atomic enough in practice:
-        // hook processes are serialized by Claude Code and lines stay well under
-        // the pipe-buffer size, so readers never see a torn line.
-        fs.appendFileSync(log, line, "utf8");
-        (0, paths_1.writeAtomic)((0, paths_1.currentSessionPath)(), sessionId);
+        const line = JSON.stringify({ at: Date.now(), ...event }) + "\n";
+        // Async hooks run concurrently, so several processes may append at once.
+        // Each line goes out in one O_APPEND write well under the pipe-buffer
+        // size, which keeps lines whole; the order between them is not promised.
+        fs.appendFileSync(log, line, { encoding: "utf8", mode: 0o600 });
+        if (fs.statSync(log).size > MAX_LOG_BYTES)
+            fs.writeFileSync(log, "");
     }
     catch {
         /* a broken game must never break the user's real work */
+    }
+}
+/** Record the most recent session, the fallback when `launch` gets no id. */
+function markCurrentSession(sessionId) {
+    try {
+        (0, paths_1.ensureDirs)();
+        (0, paths_1.writeAtomic)((0, paths_1.currentSessionPath)(), sessionId);
+    }
+    catch {
+        /* ignore */
     }
 }
 /** Start a fresh log for a new run. */
 function resetLog(sessionId) {
     try {
         (0, paths_1.ensureDirs)();
-        fs.writeFileSync((0, paths_1.eventLogPath)(sessionId), "");
+        fs.writeFileSync((0, paths_1.eventLogPath)(sessionId), "", { mode: 0o600 });
     }
     catch {
         /* ignore */
@@ -161,6 +176,14 @@ function readState(sessionId) {
     catch {
         return null;
     }
+}
+/**
+ * Whether a game is attached to this session right now. The game skips the
+ * existing log when it attaches, so events written while nothing is playing
+ * would never be read: hooks check this and skip the write.
+ */
+function gameIsLive(sessionId) {
+    return (0, events_1.isLive)(readState(sessionId));
 }
 function readCurrentSessionId() {
     try {

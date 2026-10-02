@@ -1,3 +1,4 @@
+import { MAX_LIVES } from "../events";
 import {
   ENEMY_SPECS,
   type Engine,
@@ -120,6 +121,7 @@ export interface RenderOptions {
   sessionLabel: string;
   attached: boolean;
   highScore: number;
+  mouse: boolean;
 }
 
 export function pickFieldSize(columns: number, rows: number): { width: number; height: number } {
@@ -152,12 +154,16 @@ function putText(grid: Cell[][], x: number, y: number, text: string, color: stri
   for (let i = 0; i < text.length; i++) put(grid, x + i, y, text[i] ?? " ", color);
 }
 
-function serialize(grid: Cell[][]): string {
+/**
+ * Clipped to the terminal: the field is sized once at launch, and a frame
+ * wider or taller than a shrunken pane would wrap and scroll into garbage.
+ */
+function serialize(grid: Cell[][], columns: number, rows: number): string {
   const out: string[] = [];
-  for (const row of grid) {
+  for (const row of grid.slice(0, Math.max(1, rows))) {
     let line = "";
     let current = "";
-    for (const cell of row) {
+    for (const cell of row.slice(0, Math.max(1, columns))) {
       if (cell.color !== current) {
         if (current) line += RESET;
         const code = colorCode(cell.color);
@@ -313,11 +319,11 @@ export function renderFrame(engine: Engine, opts: RenderOptions): string {
 
   putText(grid, cursor, hud1, "LIVES", "dim");
   cursor += 6;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < MAX_LIVES; i++) {
     const alive = i < engine.lives;
     put(grid, cursor + i, hud1, alive ? theme.heart : theme.emptyHeart, alive ? "red" : "dim");
   }
-  cursor += 4;
+  cursor += MAX_LIVES + 1;
 
   if (engine.combo >= 2) {
     const mult = 1 + Math.floor(engine.combo / 5) * 0.5;
@@ -335,7 +341,9 @@ export function renderFrame(engine: Engine, opts: RenderOptions): string {
     grid,
     0,
     boxBottom + 3,
-    "move " + arrowHint(opts.ascii) + "  fire SPACE  pause P  quit Q",
+    opts.mouse
+      ? "move " + arrowHint(opts.ascii) + "/mouse  fire SPACE/click  pause P  quit Q"
+      : "move " + arrowHint(opts.ascii) + "  fire SPACE  pause P  quit Q",
     "dim",
   );
 
@@ -353,7 +361,7 @@ export function renderFrame(engine: Engine, opts: RenderOptions): string {
     }
   }
 
-  return serialize(grid);
+  return serialize(grid, opts.columns, opts.rows);
 }
 
 function arrowHint(ascii: boolean): string {

@@ -17,6 +17,7 @@ const STATE_INTERVAL_MS = 400;
 function parseArgs(argv) {
     let sessionId = null;
     let ascii = false;
+    let mouse = process.env.CLAUDE_ARCADE_MOUSE !== "0";
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         if (arg === "--session" || arg === "-s") {
@@ -26,23 +27,27 @@ function parseArgs(argv) {
         else if (arg === "--ascii") {
             ascii = true;
         }
+        else if (arg === "--no-mouse") {
+            mouse = false;
+        }
     }
     if (!sessionId)
         sessionId = process.env.CLAUDE_ARCADE_SESSION ?? null;
     if (!sessionId)
         sessionId = (0, bus_1.readCurrentSessionId)();
-    return { sessionId, ascii };
+    return { sessionId, ascii, mouse };
 }
 const ESC = String.fromCharCode(27);
 const ENTER_SCREEN = `${ESC}[?1049h${ESC}[?25l`;
 const LEAVE_SCREEN = `${ESC}[?25h${ESC}[?1049l`;
 const HOME = `${ESC}[H`;
+const CLEAR = `${ESC}[2J`;
 function main() {
     const args = parseArgs(process.argv.slice(2));
     (0, paths_1.ensureDirs)();
     const sessionId = args.sessionId ?? "standalone";
     const attached = args.sessionId !== null;
-    const highScore = (0, bus_1.readHighScore)();
+    let highScore = (0, bus_1.readHighScore)();
     const columns = process.stdout.columns ?? 100;
     const rows = process.stdout.rows ?? 30;
     const size = (0, render_1.pickFieldSize)(columns, rows);
@@ -54,6 +59,7 @@ function main() {
         columns,
         rows,
         ascii: args.ascii || process.env.CLAUDE_ARCADE_ASCII === "1",
+        mouse: args.mouse,
         sessionLabel: sessionId.slice(0, 8),
         attached,
         highScore,
@@ -61,7 +67,14 @@ function main() {
     let running = true;
     let lastFrame = Date.now();
     let lastState = 0;
+    let lastStatus = engine.status;
+    /** False while the terminal is still swallowing the previous frame. */
+    let writable = true;
     let timer = null;
+    const saveHighScore = () => {
+        (0, bus_1.writeHighScore)(engine.score);
+        highScore = Math.max(highScore, engine.score);
+    };
     const quit = () => {
         if (!running)
             return;
@@ -69,18 +82,32 @@ function main() {
         if (timer)
             clearInterval(timer);
         input.stop();
-        (0, bus_1.writeHighScore)(engine.score);
+        saveHighScore();
         (0, bus_1.publishState)(snapshot(engine, sessionId, "detached", highScore));
         process.stdout.write(LEAVE_SCREEN);
         process.stdout.write(`TOOLSTORM - final score ${engine.score}, wave ${engine.wave}\n`);
         process.exit(0);
     };
-    const input = (0, input_1.startInput)(quit);
+    const input = (0, input_1.startInput)(quit, args.mouse);
+    /** The pointer column last applied, so the keys still work once it rests. */
+    let lastAim = null;
     process.on("SIGINT", quit);
     process.on("SIGTERM", quit);
+    // Closing the pane or window hangs up on us: still keep the score.
+    process.on("SIGHUP", quit);
+    // However we exit, a terminal left in mouse mode prints junk on every click.
+    process.on("exit", () => {
+        if (args.mouse)
+            process.stdout.write(input_1.MOUSE_OFF);
+    });
+    process.stdout.on("drain", () => {
+        writable = true;
+    });
     process.stdout.on("resize", () => {
         opts.columns = process.stdout.columns ?? opts.columns;
         opts.rows = process.stdout.rows ?? opts.rows;
+        // Whatever the old size left on screen is now in the wrong place.
+        process.stdout.write(CLEAR);
     });
     process.stdout.write(ENTER_SCREEN);
     engine.pushLog(attached ? "attached to session" : "no session - solo run", "cyan");
@@ -96,24 +123,36 @@ function main() {
             for (const event of tail.read())
                 engine.ingest(event);
         }
-        for (const command of input.drain()) {
-            if (command === "left")
-                engine.moveBy(-input_1.MOVE_STEP);
-            else if (command === "right")
-                engine.moveBy(input_1.MOVE_STEP);
-            else
-                engine.apply(command);
+        for (const command of input.drain())
+            engine.apply(command);
+        // The field starts one column in, past the border, and terminal columns
+        // count from 1: column 2 is field x 0.
+        const aim = input.aim();
+        if (aim !== null && aim !== lastAim) {
+            lastAim = aim;
+            engine.moveTo(aim - 2);
         }
+        if (input.firing())
+            engine.apply("fire");
         engine.step(dt);
-        process.stdout.write(HOME + (0, render_1.renderFrame)(engine, opts));
+        if (engine.status === "gameover" && lastStatus !== "gameover") {
+            // Save now, not at quit: the pane may be closed without a clean exit.
+            saveHighScore();
+        }
+        else if (lastStatus === "gameover" && engine.status !== "gameover") {
+            // A restart: the old run's score is now the one to beat.
+            opts.highScore = highScore;
+        }
+        lastStatus = engine.status;
+        // A slow terminal would otherwise queue frames in memory without bound;
+        // skipping a frame costs nothing, the next one redraws everything.
+        if (writable)
+            writable = process.stdout.write(HOME + (0, render_1.renderFrame)(engine, opts));
         if (now - lastState >= STATE_INTERVAL_MS) {
             lastState = now;
-            (0, bus_1.publishState)(snapshot(engine, sessionId, statusForHud(engine.status), highScore));
+            (0, bus_1.publishState)(snapshot(engine, sessionId, engine.status, highScore));
         }
     }, FRAME_MS);
-}
-function statusForHud(status) {
-    return status;
 }
 function snapshot(engine, sessionId, status, highScore) {
     return {

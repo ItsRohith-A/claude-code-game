@@ -51,14 +51,14 @@ const child_process_1 = require("child_process");
 const paths_1 = require("./paths");
 const bus_1 = require("./bus");
 const GAME_ENTRY = path.join(__dirname, "game", "main.js");
-const STATUSLINE_ENTRY = path.join(__dirname, "statusline.js");
 /** Status line refresh in seconds. Low enough to feel live, high enough to be cheap. */
 const STATUSLINE_REFRESH = 2;
 function settingsPath() {
     return path.join(os.homedir(), ".claude", "settings.json");
 }
-function statuslineBackupPath() {
-    return path.join((0, paths_1.rootDir)(), "statusline-backup.json");
+/** A copy of the whole settings.json from before our last edit. */
+function settingsBackupPath() {
+    return path.join((0, paths_1.rootDir)(), "settings-backup.json");
 }
 /** Forward slashes keep the path safe inside a JSON string and a shell command. */
 function posix(p) {
@@ -68,51 +68,121 @@ function resolveSession(argv) {
     const flag = argv.indexOf("--session");
     if (flag !== -1 && argv[flag + 1])
         return argv[flag + 1] ?? null;
-    return process.env.CLAUDE_SESSION_ID ?? (0, bus_1.readCurrentSessionId)();
+    // Last resort: whichever session submitted a prompt most recently. The
+    // /toolstorm skill always passes --session, so this only serves people
+    // running the CLI by hand.
+    return (0, bus_1.readCurrentSessionId)();
+}
+// ---------------------------------------------------------------- launching ---
+/** Quote one argument for a POSIX shell. */
+function shQuote(arg) {
+    return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+/** Quote one argument the way Windows programs split their command line. */
+function winQuote(arg) {
+    return `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
+}
+/** Escape text for the inside of an AppleScript string literal. */
+function appleString(text) {
+    return text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+/** For terminal CLIs that report failure: run to completion, check the status. */
+function viaCli(name, command, args) {
+    return {
+        name,
+        run: () => (0, child_process_1.spawnSync)(command, args, { stdio: "ignore", windowsHide: true }).status === 0,
+    };
+}
+/** For GUI launchers that hand off and return: fire and forget. */
+function detachedLauncher(name, command, args, extra = {}) {
+    return {
+        name,
+        run: () => {
+            try {
+                const child = (0, child_process_1.spawn)(command, args, { detached: true, stdio: "ignore", ...extra });
+                child.on("error", () => {
+                    /* reported to nobody: we already printed a launch message */
+                });
+                child.unref();
+                return true;
+            }
+            catch {
+                return false;
+            }
+        },
+    };
 }
 /**
- * Pick the best way to put the game beside Claude. Splitting the current
- * window is far nicer than a floating window, so tmux and Windows Terminal
- * splits are tried first.
+ * Every way we know to put the game beside Claude, best first. Splitting the
+ * pane Claude is in beats a floating window, so multiplexers and terminals
+ * with a split CLI come first, each only when we are actually inside it.
  */
-function pickLauncher(gameArgs) {
+function launchers(gameArgs) {
     const node = process.execPath;
-    const inner = [GAME_ENTRY, ...gameArgs];
-    if (process.env.TMUX) {
-        return { name: "tmux split", command: "tmux", args: ["split-window", "-h", node, ...inner] };
+    const argv = [node, GAME_ENTRY, ...gameArgs];
+    const shellCommand = argv.map(shQuote).join(" ");
+    const env = process.env;
+    const out = [];
+    if (env.TMUX) {
+        // tmux runs its command through a shell, so hand it one quoted string.
+        out.push(viaCli("tmux split", "tmux", ["split-window", "-h", shellCommand]));
+    }
+    if (env.ZELLIJ) {
+        out.push(viaCli("zellij pane", "zellij", ["run", "--direction", "right", "--name", "TOOLSTORM", "--", ...argv]));
+    }
+    if (env.WEZTERM_PANE) {
+        out.push(viaCli("WezTerm split", "wezterm", ["cli", "split-pane", "--right", "--", ...argv]));
+    }
+    if (env.KITTY_WINDOW_ID) {
+        // Needs allow_remote_control in kitty.conf; falls through when it is off.
+        out.push(viaCli("kitty split", "kitty", ["@", "launch", "--location=vsplit", "--title", "TOOLSTORM", ...argv]));
     }
     if (process.platform === "win32") {
-        if (hasCommand("wt")) {
-            // -w 0 targets the window this session is already in.
-            return {
-                name: "Windows Terminal split",
-                command: "wt",
-                args: ["-w", "0", "split-pane", "-V", "--title", "TOOLSTORM", node, ...inner],
-            };
+        // Only split Windows Terminal when we are inside it: `-w 0` means "the
+        // most recent window", which from VS Code would be some other window.
+        if (env.WT_SESSION && hasCommand("wt")) {
+            out.push(detachedLauncher("Windows Terminal split", "wt", [
+                "-w",
+                "0",
+                "split-pane",
+                "-V",
+                "--title",
+                "TOOLSTORM",
+                ...argv,
+            ]));
         }
-        return {
-            name: "new console window",
-            command: "cmd",
-            args: ["/c", "start", "TOOLSTORM", "cmd", "/k", node, ...inner],
-        };
+        // `start` reads its first argument as the window title only when it is
+        // quoted, so build the command line ourselves rather than let Node quote.
+        const line = `start "TOOLSTORM" ${argv.map(winQuote).join(" ")}`;
+        out.push(detachedLauncher("new console window", "cmd.exe", ["/d", "/s", "/c", `"${line}"`], {
+            windowsVerbatimArguments: true,
+        }));
+        return out;
     }
     if (process.platform === "darwin") {
-        const script = `tell application "Terminal" to do script "${posix(node)} ${inner
-            .map((a) => `'${a}'`)
-            .join(" ")}"`;
-        return { name: "Terminal.app window", command: "osascript", args: ["-e", script] };
+        if (env.TERM_PROGRAM === "iTerm.app") {
+            const script = `tell application "iTerm" to tell current session of current window to ` +
+                `split vertically with default profile command "${appleString(shellCommand)}"`;
+            out.push(viaCli("iTerm split", "osascript", ["-e", script]));
+        }
+        const script = `tell application "Terminal"\n` +
+            `  do script "${appleString(shellCommand)}"\n` +
+            `  activate\n` +
+            `end tell`;
+        out.push(viaCli("Terminal.app window", "osascript", ["-e", script]));
+        return out;
     }
-    for (const term of ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]) {
+    for (const term of ["x-terminal-emulator", "gnome-terminal", "konsole", "alacritty", "xterm"]) {
         if (hasCommand(term)) {
-            const args = term === "gnome-terminal" ? ["--", node, ...inner] : ["-e", node, ...inner];
-            return { name: term, command: term, args };
+            const args = term === "gnome-terminal" ? ["--", ...argv] : ["-e", ...argv];
+            out.push(detachedLauncher(term, term, args));
         }
     }
-    return null;
+    return out;
 }
 function hasCommand(name) {
     const probe = process.platform === "win32" ? "where" : "which";
-    const result = (0, child_process_1.spawnSync)(probe, [name], { stdio: "ignore" });
+    const result = (0, child_process_1.spawnSync)(probe, [name], { stdio: "ignore", windowsHide: true });
     return result.status === 0;
 }
 function launch(argv) {
@@ -120,76 +190,153 @@ function launch(argv) {
     const gameArgs = session ? ["--session", session] : [];
     if (argv.includes("--ascii"))
         gameArgs.push("--ascii");
-    const launcher = pickLauncher(gameArgs);
-    if (!launcher) {
+    if (argv.includes("--no-mouse"))
+        gameArgs.push("--no-mouse");
+    const used = launchers(gameArgs).find((launcher) => launcher.run());
+    if (!used) {
         console.error("Could not find a terminal to open. Run this in a spare pane instead:");
         console.error(`  node "${posix(GAME_ENTRY)}"${session ? ` --session ${session}` : ""}`);
         return 1;
     }
-    const child = (0, child_process_1.spawn)(launcher.command, launcher.args, {
-        detached: true,
-        stdio: "ignore",
-    });
-    child.unref();
-    console.log(`TOOLSTORM launched (${launcher.name}).`);
+    console.log(`TOOLSTORM launched (${used.name}).`);
     if (session)
         console.log(`Attached to session ${session.slice(0, 8)} - your tool calls feed it.`);
     else
         console.log("No Claude session found yet; it will run standalone.");
-    console.log("Controls: arrows or A/D move, SPACE fires, P pauses, Q quits.");
+    console.log("Controls: mouse or arrows/A/D move, click or SPACE fires, P pauses, Q quits.");
     return 0;
 }
-// ------------------------------------------------------------- status line ---
-function readJsonFile(file) {
+/**
+ * Read settings.json. A missing file is an empty object; a file we cannot
+ * parse is an error, never an empty object: writing one back would erase
+ * every setting the user has.
+ */
+function readSettings(file) {
+    let text;
     try {
-        const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+        text = fs.readFileSync(file, "utf8");
+    }
+    catch (err) {
+        if (err.code === "ENOENT")
+            return { settings: {} };
+        return { error: `could not read ${posix(file)}: ${err.message}` };
+    }
+    if (!text.trim())
+        return { settings: {} };
+    try {
+        const parsed = JSON.parse(text.replace(/^﻿/, ""));
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            return parsed;
+            return { settings: parsed };
         }
+        return { error: `${posix(file)} does not hold a JSON object` };
     }
-    catch {
-        /* missing or malformed: treat as empty */
+    catch (err) {
+        return { error: `${posix(file)} is not valid JSON (${err.message})` };
     }
-    return {};
+}
+function readJsonObject(file) {
+    const result = readSettings(file);
+    return "settings" in result && Object.keys(result.settings).length > 0 ? result.settings : null;
+}
+/** Keep a copy of the file as it was, then write the new one in its place. */
+function writeSettings(file, settings) {
+    (0, paths_1.ensureDirs)();
+    if (fs.existsSync(file)) {
+        // settings.json can hold tokens in `env`: keep the copy private.
+        fs.copyFileSync(file, settingsBackupPath());
+        fs.chmodSync(settingsBackupPath(), 0o600);
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    (0, paths_1.writeAtomic)(file, JSON.stringify(settings, null, 2) + "\n", 0o644);
+}
+/**
+ * A small file at a stable path that loads the current install's status line.
+ * The plugin root moves on every update; settings.json must not follow it.
+ */
+function writeStatuslineShim() {
+    (0, paths_1.ensureDirs)();
+    (0, paths_1.writeAtomic)((0, paths_1.pluginRootPointerPath)(), __dirname, 0o644);
+    const shim = (0, paths_1.statuslineShimPath)();
+    const source = [
+        "// TOOLSTORM status line shim, written by `/toolstorm install`.",
+        "// Loads the status line from the current plugin install, wherever that is.",
+        'const fs = require("fs");',
+        'const path = require("path");',
+        `let dir = ${JSON.stringify(__dirname)};`,
+        "try {",
+        `  const current = fs.readFileSync(${JSON.stringify((0, paths_1.pluginRootPointerPath)())}, "utf8").trim();`,
+        '  if (current && fs.existsSync(path.join(current, "statusline.js"))) dir = current;',
+        "} catch {}",
+        'try { require(path.join(dir, "statusline.js")); } catch {}',
+        "",
+    ].join("\n");
+    (0, paths_1.writeAtomic)(shim, source, 0o644);
+    return shim;
+}
+function failSettings(error) {
+    console.error(`Left your settings untouched: ${error}.`);
+    console.error("Fix the file, or add this to it by hand:");
+    console.error(JSON.stringify({ statusLine: { type: "command", command: `node "${posix((0, paths_1.statuslineShimPath)())}"` } }, null, 2));
+    return 1;
 }
 function installStatusline() {
     const file = settingsPath();
-    const settings = readJsonFile(file);
+    const read = readSettings(file);
+    if ("error" in read)
+        return failSettings(read.error);
+    const settings = read.settings;
+    const shim = writeStatuslineShim();
     const desired = {
         type: "command",
-        command: `node "${posix(STATUSLINE_ENTRY)}"`,
+        command: `node "${posix(shim)}"`,
         refreshInterval: STATUSLINE_REFRESH,
     };
     const existing = settings["statusLine"];
-    if (existing && typeof existing === "object") {
-        const current = existing;
-        if (typeof current.command === "string" && current.command.includes("statusline.js")) {
+    const current = existing && typeof existing === "object" ? existing : null;
+    if (current && (0, paths_1.isToolstormStatusline)(current.command)) {
+        if (current.command === desired.command) {
             console.log("TOOLSTORM status line already installed.");
             return 0;
         }
-        // Keep whatever the user had so remove-statusline can put it back.
-        (0, paths_1.ensureDirs)();
-        (0, paths_1.writeAtomic)(statuslineBackupPath(), JSON.stringify(existing, null, 2));
-        console.log(`Saved your existing status line to ${posix(statuslineBackupPath())}`);
+        // An older version pointed into the plugin root: move it to the shim.
+        settings["statusLine"] = { ...current, ...desired };
+        writeSettings(file, settings);
+        console.log("Updated the TOOLSTORM status line to survive plugin updates.");
+        return 0;
     }
+    if (current) {
+        // Keep whatever the user had: remove-statusline puts it back, and the HUD
+        // keeps running it as its first row in the meantime.
+        (0, paths_1.writeAtomic)((0, paths_1.statuslineBackupPath)(), JSON.stringify(existing, null, 2));
+        console.log(`Saved your existing status line to ${posix((0, paths_1.statuslineBackupPath)())}`);
+        console.log("It keeps running: its output stays on the first row.");
+    }
+    else {
+        // Nothing to restore later, so a backup left from an old install is stale.
+        fs.rmSync((0, paths_1.statuslineBackupPath)(), { force: true });
+    }
+    const existed = fs.existsSync(file);
     settings["statusLine"] = desired;
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    (0, paths_1.writeAtomic)(file, JSON.stringify(settings, null, 2) + "\n");
+    writeSettings(file, settings);
     console.log(`Installed the TOOLSTORM HUD into ${posix(file)}`);
-    console.log("Row 1 keeps model/branch/context; row 2 is the live score.");
+    if (existed)
+        console.log(`A copy of the previous file is at ${posix(settingsBackupPath())}`);
     console.log("Restart Claude Code (or run /statusline) to pick it up.");
     return 0;
 }
 function removeStatusline() {
     const file = settingsPath();
-    const settings = readJsonFile(file);
+    const read = readSettings(file);
+    if ("error" in read)
+        return failSettings(read.error);
+    const settings = read.settings;
     const existing = settings["statusLine"];
-    if (!existing || typeof existing.command !== "string" || !existing.command.includes("statusline.js")) {
+    if (!existing || !(0, paths_1.isToolstormStatusline)(existing.command)) {
         console.log("TOOLSTORM status line is not installed; nothing to do.");
         return 0;
     }
-    const backup = readJsonFile(statuslineBackupPath());
-    if (Object.keys(backup).length > 0) {
+    const backup = readJsonObject((0, paths_1.statuslineBackupPath)());
+    if (backup && typeof backup["command"] === "string" && !(0, paths_1.isToolstormStatusline)(backup["command"])) {
         settings["statusLine"] = backup;
         console.log("Restored your previous status line.");
     }
@@ -197,7 +344,9 @@ function removeStatusline() {
         delete settings["statusLine"];
         console.log("Removed the status line entry.");
     }
-    (0, paths_1.writeAtomic)(file, JSON.stringify(settings, null, 2) + "\n");
+    writeSettings(file, settings);
+    fs.rmSync((0, paths_1.statuslineBackupPath)(), { force: true });
+    fs.rmSync((0, paths_1.statuslineShimPath)(), { force: true });
     return 0;
 }
 // ------------------------------------------------------------------ status ---
@@ -220,7 +369,6 @@ async function simulate(argv) {
     console.log(`Launch the game with:  node "${posix(GAME_ENTRY)}" --session ${session}`);
     const script = [
         ["turn_start", {}],
-        ["tool_pending", { tool: "Read", label: "auth.ts" }],
         ["scout", { tool: "Read", label: "auth.ts" }],
         ["bug", { tool: "Edit", label: "auth.ts", weight: 2 }],
         ["scout", { tool: "Grep", label: "verifyToken" }],
@@ -266,6 +414,8 @@ async function main() {
             const args = [GAME_ENTRY, ...(session ? ["--session", session] : [])];
             if (argv.includes("--ascii"))
                 args.push("--ascii");
+            if (argv.includes("--no-mouse"))
+                args.push("--no-mouse");
             const child = (0, child_process_1.spawn)(process.execPath, args, { stdio: "inherit" });
             child.on("exit", (code) => process.exit(code ?? 0));
             break;

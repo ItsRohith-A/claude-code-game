@@ -7,12 +7,15 @@
  *
  * A plugin cannot register a status line (Claude Code only honours `agent` and
  * `subagentStatusLine` from a plugin's settings), so `/toolstorm install`
- * writes the `statusLine` entry into the user's own settings.json.
+ * writes the `statusLine` entry into the user's own settings.json. If the user
+ * had a status line before, it keeps running: its output replaces row one.
  */
 import * as fs from "fs";
 import * as path from "path";
+import { spawnSync } from "child_process";
 import { readState } from "./bus";
-import { MAX_LIVES, type GameState } from "./events";
+import { LIVE_WINDOW_MS, MAX_LIVES, type GameState } from "./events";
+import { isToolstormStatusline, statuslineBackupPath } from "./paths";
 
 const ESC = String.fromCharCode(27);
 const CSI = `${ESC}[`;
@@ -29,8 +32,8 @@ const C = {
   bold: `${CSI}1m`,
 };
 
-/** A frame older than this means the game pane is gone or frozen. */
-const LIVE_WINDOW_MS = 6000;
+/** The chained status line gets this long before we draw without it. */
+const CHAINED_TIMEOUT_MS = 1000;
 
 interface StatusInput {
   session_id?: string;
@@ -44,18 +47,41 @@ function paint(text: string, color: string): string {
   return `${color}${text}${RESET}`;
 }
 
+/**
+ * The directory holding HEAD for a checkout. In a worktree or submodule, `.git`
+ * is a file that points elsewhere with a `gitdir:` line.
+ */
+function gitDirOf(dir: string): string | null {
+  const dotGit = path.join(dir, ".git");
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(dotGit);
+  } catch {
+    return null;
+  }
+  if (stat.isDirectory()) return dotGit;
+  try {
+    const match = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, "utf8"));
+    return match && match[1] ? path.resolve(dir, match[1].trim()) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Read the branch from .git directly: spawning git would slow every refresh. */
 function gitBranch(dir: string): string | null {
   let current = path.resolve(dir);
   for (let i = 0; i < 12; i++) {
-    const head = path.join(current, ".git", "HEAD");
-    try {
-      const contents = fs.readFileSync(head, "utf8").trim();
-      const match = /^ref: refs\/heads\/(.+)$/.exec(contents);
-      if (match && match[1]) return match[1];
-      return contents.slice(0, 7); // detached HEAD
-    } catch {
-      /* keep walking up */
+    const gitDir = gitDirOf(current);
+    if (gitDir) {
+      try {
+        const contents = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
+        const match = /^ref: refs\/heads\/(.+)$/.exec(contents);
+        if (match && match[1]) return match[1];
+        return contents.slice(0, 7); // detached HEAD
+      } catch {
+        return null;
+      }
     }
     const parent = path.dirname(current);
     if (parent === current) break;
@@ -137,7 +163,7 @@ function infoRow(input: StatusInput): string {
 
   const dir = input.workspace?.current_dir ?? input.workspace?.project_dir;
   if (dir) {
-    parts.push(paint(path.basename(dir), C.white));
+    parts.push(paint(path.basename(path.resolve(dir)), C.white));
     const branch = gitBranch(dir);
     if (branch) parts.push(paint(branch, C.magenta));
   }
@@ -153,6 +179,52 @@ function infoRow(input: StatusInput): string {
   }
 
   return parts.join(sep);
+}
+
+/** Git Bash, found the way Claude Code finds it; bare `bash` may be WSL's. */
+function gitBash(): string {
+  const candidates = [
+    process.env.CLAUDE_CODE_GIT_BASH_PATH,
+    path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe"),
+  ];
+  return candidates.find((c): c is string => !!c && fs.existsSync(c)) ?? "bash";
+}
+
+/**
+ * Run the status line the user had before installing the HUD, feeding it the
+ * same JSON, so installing TOOLSTORM adds a row instead of replacing theirs.
+ */
+function chainedRows(raw: string): string | null {
+  let previous: { command?: unknown };
+  try {
+    previous = JSON.parse(fs.readFileSync(statuslineBackupPath(), "utf8")) as { command?: unknown };
+  } catch {
+    return null;
+  }
+  if (typeof previous.command !== "string" || !previous.command.trim()) return null;
+  // Never chain to ourselves: that would recurse on every refresh.
+  if (isToolstormStatusline(previous.command)) return null;
+  const options = {
+    input: raw,
+    encoding: "utf8" as const,
+    timeout: CHAINED_TIMEOUT_MS,
+    windowsHide: true,
+  };
+  try {
+    // Status line commands are written for a POSIX shell. On Windows that is
+    // Git Bash, as Claude Code itself uses; plain cmd is the last resort.
+    let result =
+      process.platform === "win32"
+        ? spawnSync(gitBash(), ["-c", previous.command], options)
+        : spawnSync(previous.command, { ...options, shell: true });
+    if (result.error && process.platform === "win32") {
+      result = spawnSync(previous.command, { ...options, shell: true });
+    }
+    const out = (result.stdout ?? "").replace(/\s+$/, "");
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 function readStdin(): Promise<string> {
@@ -187,7 +259,8 @@ async function main(): Promise<void> {
   const sessionId = input.session_id ?? "";
   const state = sessionId ? readState(sessionId) : null;
 
-  const lines = [infoRow(input), gameRow(state)].filter((line) => line.length > 0);
+  const first = chainedRows(raw) ?? infoRow(input);
+  const lines = [first, gameRow(state)].filter((line) => line.length > 0);
   process.stdout.write(lines.join("\n") + "\n");
 }
 

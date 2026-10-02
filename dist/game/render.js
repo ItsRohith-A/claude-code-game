@@ -4,6 +4,7 @@ exports.colorCode = colorCode;
 exports.paint = paint;
 exports.pickFieldSize = pickFieldSize;
 exports.renderFrame = renderFrame;
+const events_1 = require("../events");
 const engine_1 = require("./engine");
 const UNICODE = {
     scout: "▾",
@@ -100,12 +101,16 @@ function putText(grid, x, y, text, color) {
     for (let i = 0; i < text.length; i++)
         put(grid, x + i, y, text[i] ?? " ", color);
 }
-function serialize(grid) {
+/**
+ * Clipped to the terminal: the field is sized once at launch, and a frame
+ * wider or taller than a shrunken pane would wrap and scroll into garbage.
+ */
+function serialize(grid, columns, rows) {
     const out = [];
-    for (const row of grid) {
+    for (const row of grid.slice(0, Math.max(1, rows))) {
         let line = "";
         let current = "";
-        for (const cell of row) {
+        for (const cell of row.slice(0, Math.max(1, columns))) {
             if (cell.color !== current) {
                 if (current)
                     line += RESET;
@@ -247,11 +252,11 @@ function renderFrame(engine, opts) {
     cursor = putSeg(grid, cursor, hud1, "WAVE", String(engine.wave), "cyan");
     putText(grid, cursor, hud1, "LIVES", "dim");
     cursor += 6;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < events_1.MAX_LIVES; i++) {
         const alive = i < engine.lives;
         put(grid, cursor + i, hud1, alive ? theme.heart : theme.emptyHeart, alive ? "red" : "dim");
     }
-    cursor += 4;
+    cursor += events_1.MAX_LIVES + 1;
     if (engine.combo >= 2) {
         const mult = 1 + Math.floor(engine.combo / 5) * 0.5;
         putText(grid, cursor, hud1, `COMBO x${engine.combo} (${mult.toFixed(1)}x)`, "yellow");
@@ -262,7 +267,9 @@ function renderFrame(engine, opts) {
     px = putTimer(grid, px, hud2, theme, "SHIELD", engine.shieldTime, 10, "cyan");
     px = putTimer(grid, px, hud2, theme, "SPREAD", engine.spreadTime, 12, "yellow");
     putTimer(grid, px, hud2, theme, "RAPID", engine.rapidTime, 12, "green");
-    putText(grid, 0, boxBottom + 3, "move " + arrowHint(opts.ascii) + "  fire SPACE  pause P  quit Q", "dim");
+    putText(grid, 0, boxBottom + 3, opts.mouse
+        ? "move " + arrowHint(opts.ascii) + "/mouse  fire SPACE/click  pause P  quit Q"
+        : "move " + arrowHint(opts.ascii) + "  fire SPACE  pause P  quit Q", "dim");
     // ---- side panel: what Claude is actually doing -------------------------
     if (showPanel) {
         const px0 = boxWidth + 1;
@@ -278,7 +285,7 @@ function renderFrame(engine, opts) {
             putText(grid, px0, y, line.text.slice(0, PANEL_WIDTH), line.color || "white");
         }
     }
-    return serialize(grid);
+    return serialize(grid, opts.columns, opts.rows);
 }
 function arrowHint(ascii) {
     return ascii ? "A/D" : "←/→";

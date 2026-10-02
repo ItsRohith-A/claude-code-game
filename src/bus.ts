@@ -7,25 +7,37 @@ import {
   statePath,
   writeAtomic,
 } from "./paths";
-import type { GameEvent, GameState } from "./events";
+import { isLive, type GameEvent, type GameState } from "./events";
+
+/** A log past this size is restarted; the game tail notices the truncation. */
+const MAX_LOG_BYTES = 1024 * 1024;
 
 /**
  * Append one event. Called from hook processes, which must never fail loudly
  * and must never block Claude: every error is swallowed on purpose.
  */
-export function publish(sessionId: string, event: Omit<GameEvent, "seq" | "at">): void {
+export function publish(sessionId: string, event: Omit<GameEvent, "at">): void {
   try {
     ensureDirs();
     const log = eventLogPath(sessionId);
-    const seq = Date.now() * 1000 + Math.floor(Math.random() * 1000);
-    const line = JSON.stringify({ seq, at: Date.now(), ...event }) + "\n";
-    // A single appendFileSync of a short line is atomic enough in practice:
-    // hook processes are serialized by Claude Code and lines stay well under
-    // the pipe-buffer size, so readers never see a torn line.
-    fs.appendFileSync(log, line, "utf8");
-    writeAtomic(currentSessionPath(), sessionId);
+    const line = JSON.stringify({ at: Date.now(), ...event }) + "\n";
+    // Async hooks run concurrently, so several processes may append at once.
+    // Each line goes out in one O_APPEND write well under the pipe-buffer
+    // size, which keeps lines whole; the order between them is not promised.
+    fs.appendFileSync(log, line, { encoding: "utf8", mode: 0o600 });
+    if (fs.statSync(log).size > MAX_LOG_BYTES) fs.writeFileSync(log, "");
   } catch {
     /* a broken game must never break the user's real work */
+  }
+}
+
+/** Record the most recent session, the fallback when `launch` gets no id. */
+export function markCurrentSession(sessionId: string): void {
+  try {
+    ensureDirs();
+    writeAtomic(currentSessionPath(), sessionId);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -33,7 +45,7 @@ export function publish(sessionId: string, event: Omit<GameEvent, "seq" | "at">)
 export function resetLog(sessionId: string): void {
   try {
     ensureDirs();
-    fs.writeFileSync(eventLogPath(sessionId), "");
+    fs.writeFileSync(eventLogPath(sessionId), "", { mode: 0o600 });
   } catch {
     /* ignore */
   }
@@ -122,6 +134,15 @@ export function readState(sessionId: string): GameState | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a game is attached to this session right now. The game skips the
+ * existing log when it attaches, so events written while nothing is playing
+ * would never be read: hooks check this and skip the write.
+ */
+export function gameIsLive(sessionId: string): boolean {
+  return isLive(readState(sessionId));
 }
 
 export function readCurrentSessionId(): string | null {
