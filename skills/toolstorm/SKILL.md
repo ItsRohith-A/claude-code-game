@@ -2,7 +2,7 @@
 name: toolstorm
 description: Launch TOOLSTORM, the arcade game fed by this session's tool calls, or install/remove its status-line HUD.
 argument-hint: "[install | remove | status]"
-allowed-tools: [Bash]
+allowed-tools: Bash(node *dist/cli.js*)
 disable-model-invocation: true
 ---
 

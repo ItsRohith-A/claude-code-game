@@ -116,20 +116,19 @@ function launchers(gameArgs: string[]): Launcher[] {
   const node = process.execPath;
   const argv = [node, GAME_ENTRY, ...gameArgs];
   const shellCommand = argv.map(shQuote).join(" ");
-  const env = process.env;
   const out: Launcher[] = [];
 
-  if (env.TMUX) {
+  if (process.env.TMUX) {
     // tmux runs its command through a shell, so hand it one quoted string.
     out.push(viaCli("tmux split", "tmux", ["split-window", "-h", shellCommand]));
   }
-  if (env.ZELLIJ) {
+  if (process.env.ZELLIJ) {
     out.push(viaCli("zellij pane", "zellij", ["run", "--direction", "right", "--name", "TOOLSTORM", "--", ...argv]));
   }
-  if (env.WEZTERM_PANE) {
+  if (process.env.WEZTERM_PANE) {
     out.push(viaCli("WezTerm split", "wezterm", ["cli", "split-pane", "--right", "--", ...argv]));
   }
-  if (env.KITTY_WINDOW_ID) {
+  if (process.env.KITTY_WINDOW_ID) {
     // Needs allow_remote_control in kitty.conf; falls through when it is off.
     out.push(viaCli("kitty split", "kitty", ["@", "launch", "--location=vsplit", "--title", "TOOLSTORM", ...argv]));
   }
@@ -137,7 +136,7 @@ function launchers(gameArgs: string[]): Launcher[] {
   if (process.platform === "win32") {
     // Only split Windows Terminal when we are inside it: `-w 0` means "the
     // most recent window", which from VS Code would be some other window.
-    if (env.WT_SESSION && hasCommand("wt")) {
+    if (process.env.WT_SESSION && hasCommand("wt")) {
       out.push(
         detachedLauncher("Windows Terminal split", "wt", [
           "-w",
@@ -162,7 +161,7 @@ function launchers(gameArgs: string[]): Launcher[] {
   }
 
   if (process.platform === "darwin") {
-    if (env.TERM_PROGRAM === "iTerm.app") {
+    if (process.env.TERM_PROGRAM === "iTerm.app") {
       const script =
         `tell application "iTerm" to tell current session of current window to ` +
         `split vertically with default profile command "${appleString(shellCommand)}"`;

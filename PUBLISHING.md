@@ -228,11 +228,25 @@ manual review:
 4. **Explain everything in the README.** The security scan looks for hidden
    behavior. The README already says what files the plugin writes and that
    `/toolstorm install` edits `~/.claude/settings.json`. Keep that accurate.
-5. **Fill in the extra fields** in `.claude-plugin/plugin.json`: `icon` (a PNG
-   in the repo, for example `./icon.png`), `supportUrl` (for example your
-   GitHub Issues link) and, if you can, `privacyPolicyUrl`. A simple privacy
-   page can say: "TOOLSTORM collects nothing and sends nothing over the
-   network."
+5. **Icon ✅ done.** `.claude-plugin/icon.png` (512×512 PNG). The portal locks
+   the icon the **first time** you save or submit, so push it before you do.
+6. **What the portal said on its first check, and what to do:**
+   - *Narrow allowed-tools* — ✅ fixed: `/toolstorm` may only run
+     `node …/dist/cli.js`.
+   - *Reads a credential / sends data* — false alarm. The plugin reads
+     `~/.claude/settings.json` (which can hold tokens) only to add or remove
+     the `statusLine` entry, and never sends anything over the network. Say so
+     in the submission notes; a reviewer confirms it.
+   - *"toolstorm" is close to "storm"* — unrelated plugin; a reviewer confirms
+     it. **Do not rename.**
+
+Note for the reviewer (paste into the submission):
+
+> TOOLSTORM is a local terminal game. It makes no network requests. It reads
+> `~/.claude/settings.json` only when the user runs `/toolstorm install` or
+> `/toolstorm remove`, to add or remove the `statusLine` key, and keeps a local
+> backup in `~/.claude-arcade`. No data leaves the machine. The name is our
+> own and unrelated to the "storm" plugin.
 
 ### How to submit
 
