@@ -8,6 +8,8 @@
   },
   "homepage": "https://github.com/ItsRohith-A/claude-code-game#readme",
   "repository": "https://github.com/ItsRohith-A/claude-code-game",
+  "supportUrl": "https://github.com/ItsRohith-A/claude-code-game/issues",
+  "privacyPolicyUrl": "https://github.com/ItsRohith-A/claude-code-game/blob/main/PRIVACY.md",
   "license": "MIT",
   "keywords": [
     "game",

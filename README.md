@@ -394,6 +394,8 @@ Files are readable only by your user. Session files untouched for 7 days are
 deleted automatically, and an event log over 1 MB starts over. Nothing is sent
 over the network.
 
+The full policy is in [PRIVACY.md](PRIVACY.md).
+
 **What it costs.** Each tool call starts one short background Node process,
 about 100 ms of CPU. When no game is open it reads one small file and exits
 without writing. The scoreboard adds about 70 ms every 2 seconds. None of it
