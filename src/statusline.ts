@@ -17,19 +17,17 @@ import { readState } from "./bus";
 import { LIVE_WINDOW_MS, MAX_LIVES, type GameState } from "./events";
 import { isToolstormStatusline, statuslineBackupPath } from "./paths";
 
-const ESC = String.fromCharCode(27);
-const CSI = `${ESC}[`;
-const RESET = `${CSI}0m`;
+const RESET = "\x1b[0m";
 
 const C = {
-  dim: `${CSI}90m`,
-  white: `${CSI}97m`,
-  red: `${CSI}91m`,
-  green: `${CSI}92m`,
-  yellow: `${CSI}93m`,
-  magenta: `${CSI}95m`,
-  cyan: `${CSI}96m`,
-  bold: `${CSI}1m`,
+  dim: "\x1b[90m",
+  white: "\x1b[97m",
+  red: "\x1b[91m",
+  green: "\x1b[92m",
+  yellow: "\x1b[93m",
+  magenta: "\x1b[95m",
+  cyan: "\x1b[96m",
+  bold: "\x1b[1m",
 };
 
 /** The chained status line gets this long before we draw without it. */

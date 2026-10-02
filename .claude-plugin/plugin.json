@@ -2,7 +2,7 @@
   "name": "toolstorm",
   "displayName": "TOOLSTORM",
   "description": "TOOLSTORM: a playable terminal arcade shooter fueled by Claude Code's real tool calls. Every Edit spawns a bug, every passing test drops a power-up, every failure costs you a heart. Plays in its own pane with a live score HUD in Claude's status line.",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "author": {
     "name": "Rohith A"
   },

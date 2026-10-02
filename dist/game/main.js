@@ -37,11 +37,10 @@ function parseArgs(argv) {
         sessionId = (0, bus_1.readCurrentSessionId)();
     return { sessionId, ascii, mouse };
 }
-const ESC = String.fromCharCode(27);
-const ENTER_SCREEN = `${ESC}[?1049h${ESC}[?25l`;
-const LEAVE_SCREEN = `${ESC}[?25h${ESC}[?1049l`;
-const HOME = `${ESC}[H`;
-const CLEAR = `${ESC}[2J`;
+const ENTER_SCREEN = "\x1b[?1049h\x1b[?25l";
+const LEAVE_SCREEN = "\x1b[?25h\x1b[?1049l";
+const HOME = "\x1b[H";
+const CLEAR = "\x1b[2J";
 function main() {
     const args = parseArgs(process.argv.slice(2));
     (0, paths_1.ensureDirs)();

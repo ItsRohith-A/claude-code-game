@@ -44,22 +44,20 @@ const ASCII = {
     barFull: "#",
     barEmpty: ".",
 };
-const ESC = String.fromCharCode(27);
-const CSI = `${ESC}[`;
 const COLORS = {
-    reset: `${CSI}0m`,
-    dim: `${CSI}90m`,
-    white: `${CSI}97m`,
-    red: `${CSI}91m`,
-    green: `${CSI}92m`,
-    yellow: `${CSI}93m`,
-    blue: `${CSI}94m`,
-    magenta: `${CSI}95m`,
-    cyan: `${CSI}96m`,
-    bold: `${CSI}1m`,
+    reset: "\x1b[0m",
+    dim: "\x1b[90m",
+    white: "\x1b[97m",
+    red: "\x1b[91m",
+    green: "\x1b[92m",
+    yellow: "\x1b[93m",
+    blue: "\x1b[94m",
+    magenta: "\x1b[95m",
+    cyan: "\x1b[96m",
+    bold: "\x1b[1m",
 };
 /** Erase to end of line, so a shorter frame leaves no stale characters. */
-const CLEAR_EOL = `${CSI}K`;
+const CLEAR_EOL = "\x1b[K";
 const RESET = COLORS.reset;
 /** ANSI code for a theme colour name, or "" when the name is unknown. */
 function colorCode(name) {
