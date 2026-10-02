@@ -228,11 +228,13 @@ manual review:
 4. **Explain everything in the README.** The security scan looks for hidden
    behavior. The README already says what files the plugin writes and that
    `/toolstorm install` edits `~/.claude/settings.json`. Keep that accurate.
-5. **Icon ✅ done.** `.claude-plugin/icon.png` (512×512 PNG). The portal locks
-   the icon the **first time** you save or submit, so push it before you do.
+5. **Icon ✅ done.** A 512×512 PNG named icon, in the `.claude-plugin`
+   folder. The portal locks the icon the **first time** you save or submit.
+   Don't write the icon's file path in backticks or code blocks in any file:
+   the checker then assumes code might run it.
 6. **What the portal said on its first check, and what to do:**
-   - *Narrow allowed-tools* — ✅ fixed: `/toolstorm` may only run
-     `node …/dist/cli.js`.
+   - *Narrow allowed-tools* — ✅ fixed by removing `allowed-tools`: users
+     approve `/toolstorm`'s one `node` command themselves.
    - *Reads a credential / sends data* — false alarm. The plugin reads
      `~/.claude/settings.json` (which can hold tokens) only to add or remove
      the `statusLine` entry, and never sends anything over the network. Say so

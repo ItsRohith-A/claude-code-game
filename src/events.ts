@@ -121,7 +121,7 @@ const VERIFICATION = new RegExp(
 );
 
 /** Leading `FOO=bar` assignments and wrappers that do not change what runs. */
-const PREFIX = /^(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*|env|time|sudo)\s+)+/;
+const PREFIX = /^(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S*|time|sudo)\s+)+/;
 
 /** Split a shell command on `&&`, `||`, `;`, `|` and newlines outside quotes. */
 export function splitCommand(command: string): string[] {
@@ -179,9 +179,10 @@ export function labelFor(toolInput: Record<string, unknown> | undefined): string
     const words = first.replace(PREFIX, "").split(/\s+/);
     const program = path.basename(words[0] ?? "");
     // Keep a subcommand such as `test` in `npm test`, but nothing that could
-    // be a value: no `=`, no paths, no flags.
+    // be a value: short, lowercase words only, so no digits, `=`, paths,
+    // flags or tokens.
     const sub = words[1];
-    const label = sub && /^[a-z][a-z0-9:_-]*$/.test(sub) ? `${program} ${sub}` : program;
+    const label = sub && /^[a-z][a-z:_-]{0,15}$/.test(sub) ? `${program} ${sub}` : program;
     return label.slice(0, 24) || undefined;
   }
 

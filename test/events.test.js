@@ -48,7 +48,8 @@ test("splitCommand respects quotes", () => {
 test("labels keep nothing that could be a secret", () => {
   assert.equal(labelFor({ file_path: "/home/me/project/src/auth.ts" }), "auth.ts");
   assert.equal(labelFor({ command: "npm test -- --watch" }), "npm test");
-  assert.equal(labelFor({ command: "export API_KEY=sk-live-123456" }), "export");
+  assert.equal(labelFor({ command: "echo sk-live-123456" }), "echo");
+  assert.equal(labelFor({ command: "npm run test:unit" }), "npm run");
   assert.equal(labelFor({ command: "API_KEY=sk-live-1 node deploy.js" }), "node");
   assert.equal(labelFor({ command: "curl -H 'Authorization: x' https://a.io" }), "curl");
   assert.equal(labelFor({ url: "https://api.example.com/v1?key=sk-live-123456" }), "api.example.com");

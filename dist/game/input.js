@@ -23,8 +23,8 @@ const ESC = "\x1b";
  * Report button presses and releases (1000), movement with or without a button
  * held (1003), in SGR encoding (1006), which has no 223-column limit.
  */
-exports.MOUSE_ON = `${ESC}[?1000h${ESC}[?1003h${ESC}[?1006h`;
-exports.MOUSE_OFF = `${ESC}[?1006l${ESC}[?1003l${ESC}[?1000l`;
+exports.MOUSE_ON = "\x1b[?1000h\x1b[?1003h\x1b[?1006h";
+exports.MOUSE_OFF = "\x1b[?1006l\x1b[?1003l\x1b[?1000l";
 /** `ESC [ < button ; column ; row M|m`, where `m` means released. */
 const SGR_MOUSE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
 /** Bits of the SGR button code. */
