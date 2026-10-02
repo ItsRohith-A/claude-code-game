@@ -5,7 +5,7 @@ A terminal arcade shooter for the minutes you spend watching Claude Code work.
 It is not a distraction bolted onto your terminal — **Claude's actual tool calls
 are the game**. Every file Claude edits spawns a bug to shoot. Every test that
 passes drops a power-up. Every failing command costs you a heart. When Claude
-needs your permission, the game pauses itself and says so.
+needs your permission, the game pauses itself and tells you.
 
 ```
 TOOLSTORM │ live: 7f3a9c21                        ┌─ what Claude is doing
@@ -19,22 +19,400 @@ TOOLSTORM │ live: 7f3a9c21                        ┌─ what Claude is doing
 │                     ▲                        │  │
 └──────────────────────────────────────────────┘  │
 SCORE 014250  BEST 19100  WAVE 4  LIVES ♥♥♡  COMBO x7 (1.5x)
-move ←/→  fire SPACE  pause P  quit Q
+move ←/→/mouse  fire SPACE/click  pause P  quit Q
 ```
 
-## Why it is built this way
+## Contents
 
-Two constraints in Claude Code shape the whole design:
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [How to play](#how-to-play)
+- [The status-line scoreboard](#the-status-line-scoreboard)
+- [Commands and options](#commands-and-options)
+- [Try it without Claude](#try-it-without-claude)
+- [Supported terminals](#supported-terminals)
+- [Updating](#updating)
+- [Uninstalling](#uninstalling)
+- [Troubleshooting](#troubleshooting)
+- [Privacy and performance](#privacy-and-performance)
+- [How it works](#how-it-works)
+- [Development](#development)
 
-1. **Hooks cannot touch a terminal.** They run with no controlling terminal, so
-   a hook can never draw a game or read a key.
-2. **Claude Code's TUI owns stdin in its own pane.** No hook can see your
-   keypresses there.
+## Features
+
+- **Fed by real work.** Edits, searches, web fetches, tests and failures in your
+  Claude Code session become enemies, power-ups and hits.
+- **Plays beside Claude.** Opens in a split pane next to your session, so you
+  can watch Claude's transcript and play at the same time.
+- **Never in the way.** Every hook runs in the background: the game cannot slow
+  Claude down, and if it crashes your session does not notice.
+- **Pauses when you are needed.** A permission prompt or a question from Claude
+  pauses the game with a "CLAUDE NEEDS YOU" banner.
+- **Live scoreboard in Claude's pane.** An optional second status-line row
+  shows score, wave and lives, and keeps your existing status line.
+- **Mouse and keyboard.** The ship follows your pointer and holding the button
+  fires; arrow keys and WASD work too.
+- **No dependencies.** Plain Node.js, nothing to install beyond the plugin.
+
+## Requirements
+
+- **Claude Code** with plugin support.
+- **Node.js 18 or newer** on your `PATH`. Check with `node --version`.
+- **A terminal that can split panes or open windows.** See
+  [Supported terminals](#supported-terminals). Any terminal works if you open a
+  second pane yourself.
+- Windows, macOS or Linux.
+
+## Installation
+
+### From the marketplace (recommended)
+
+Run these inside Claude Code:
+
+```
+/plugin marketplace add ItsRohith-A/claude-code-game
+/plugin install toolstorm@toolstorm
+```
+
+Or from your shell:
+
+```bash
+claude plugin marketplace add ItsRohith-A/claude-code-game
+claude plugin install toolstorm@toolstorm
+```
+
+Then **restart Claude Code** so the plugin's hooks load.
+
+### Add the scoreboard (optional)
+
+```
+/toolstorm install
+```
+
+This adds a scoreboard row under Claude's prompt. It edits your
+`~/.claude/settings.json`, so it is a separate step you choose to take; see
+[The status-line scoreboard](#the-status-line-scoreboard) for exactly what
+changes. Restart Claude Code (or run `/statusline`) to see it.
+
+### From a clone (for trying changes)
+
+```bash
+git clone https://github.com/ItsRohith-A/claude-code-game.git
+cd claude-code-game
+claude --plugin-dir .
+```
+
+`dist/` is committed, so no build step is needed. If you change anything in
+`src/`, run `npm install && npm run build` first.
+
+### Check that it worked
+
+1. Start Claude Code and send any prompt.
+2. Run `/toolstorm`. A pane opens with `TOOLSTORM │ live: <session>` in green at
+   the top.
+3. Ask Claude to read or edit a file. Enemies appear and the right-hand panel
+   logs what Claude did.
+
+If the title says `standalone (no Claude session attached)`, see
+[Troubleshooting](#troubleshooting).
+
+## Quick start
+
+```
+/toolstorm
+```
+
+That is all. The game opens beside Claude and attaches to this session. Keep
+working with Claude as usual: give it a task, and shoot what its work spawns.
+Press `Q` in the game pane to quit; your best score is saved.
+
+> **Tip:** the game only reacts to tool calls made *after* it starts. It never
+> replays what Claude did earlier in the session.
+
+## How to play
+
+### Controls
+
+| Input | Action |
+| --- | --- |
+| Move the mouse, or `←` `→`, `A` `D`, `h` `l` | Move. The ship follows the pointer. |
+| Hold left click, or `SPACE`, `↑`, `W` | Fire. Holding the button keeps firing. |
+| Right click or `P` | Pause / resume, and dismiss the "Claude needs you" banner |
+| `R` | Restart after a game over |
+| `Q` or `Ctrl+C` | Quit |
+
+The game pane must have focus for input: click it, or switch to it with your
+terminal's pane shortcut.
+
+### What Claude's work turns into
+
+| When Claude… | In the game |
+| --- | --- |
+| starts work on your prompt | A new wave begins |
+| edits or writes a file (`Edit`, `Write`, `NotebookEdit`) | **◆ bug** ×2 — 2 hits, 120 pts |
+| reads or searches (`Read`, `Grep`, `Glob`, `LSP`) | **▾ scout** — fast, 1 hit, 50 pts |
+| fetches or searches the web (`WebFetch`, `WebSearch`) | **● probe** — 3 hits, shoots back, 240 pts |
+| launches a subagent (`Agent`) | **● probe** ×3 |
+| runs a test, build or lint command that passes | A **power-up** drops |
+| runs any other command | A scout |
+| hits an error in a tool | **You take a hit** |
+| needs your permission or asks you something | **Game pauses:** "CLAUDE NEEDS YOU" |
+| finishes the turn | **Wave clear**, bonus of 250 × the wave number |
+
+Some details:
+
+- **What counts as a test.** A command earns a power-up when one of its steps
+  *starts with* a test, build or lint runner: `npm test`, `pnpm run build`,
+  `yarn lint`, `pytest`, `cargo test`, `go test`, `tsc`, `make`, `gradle`,
+  `mvn`, `dotnet test` and similar. `cd web && npm test` counts.
+  `git commit -m "make it build"` does not.
+- **Pressing Esc on Claude costs nothing.** Interrupting a tool is not a
+  failure.
+- **The pause banner clears by itself** once Claude continues after your
+  answer. You can also dismiss it with `P` or a right click.
+- **When Claude is idle**, enemies still trickle in so the game is never empty.
+
+### Power-ups
+
+Catch a power-up by being under it when it reaches the floor.
+
+| Pickup | Effect |
+| --- | --- |
+| **S** shield | Absorbs the next hit (10 s) |
+| **W** spread | Fires three shots at once (12 s) |
+| **R** rapid | Fires much faster (12 s) |
+| **+** life | One extra heart. Rare, and only when you have lost one |
+
+### Scoring and losing
+
+- You have **3 hearts**. You lose one when you are shot, rammed, when an enemy
+  reaches the floor, or when one of Claude's tools fails.
+- After a hit you blink and are briefly invulnerable.
+- **Combo:** kills in quick succession build a combo. Every 5 kills in a combo
+  add ×0.5 to the points per kill. Getting hit resets it.
+- Each wave makes enemies a little faster.
+- At game over your score is saved; press `R` to start again.
+
+## The status-line scoreboard
+
+`/toolstorm install` adds a row under Claude's prompt:
+
+```
+[Opus] │ my-project │ main │ ████░░░░░░ 42% │ $1.23
+TOOLSTORM │ 014250 │ wave 4 │ ♥♥♡ │ 6 on screen │ combo x7
+```
+
+- **Row 1** is your existing status line if you had one; it keeps running
+  unchanged. If you had none, it shows model, folder, git branch, context use
+  and cost.
+- **Row 2** is the live game: score, wave, hearts, combo and alerts such as
+  `PAUSED - you are needed here`. With no game open it shows your best score
+  and a hint to play.
+- It refreshes every 2 seconds.
+
+**What install changes.** It sets one key, `statusLine`, in
+`~/.claude/settings.json`, pointing at `~/.claude-arcade/toolstorm-statusline.js`.
+Before writing it:
+
+- saves your previous status line, so `/toolstorm remove` can restore it;
+- saves a copy of the whole file to `~/.claude-arcade/settings-backup.json`;
+- refuses to write anything if your `settings.json` is not valid JSON, and
+  prints the entry so you can add it by hand.
+
+**To undo it:** `/toolstorm remove`, then restart Claude Code. Your previous
+status line comes back exactly as it was.
+
+## Commands and options
+
+### Inside Claude Code
+
+| Command | What it does |
+| --- | --- |
+| `/toolstorm` | Open the game beside Claude, attached to this session |
+| `/toolstorm install` | Add the scoreboard to your status line |
+| `/toolstorm remove` | Remove the scoreboard and restore your old status line |
+| `/toolstorm status` | Print the live game state |
+
+Only you can run these: Claude does not open the game or change your settings
+on its own. If another plugin also has a `toolstorm` command, use the full name
+`/toolstorm:toolstorm`.
+
+### From a shell
+
+The CLI is `dist/cli.js` inside the plugin. For a marketplace install it lives
+under `~/.claude/plugins/cache/toolstorm/toolstorm/<version>/`.
+
+```bash
+node dist/cli.js launch   [--session <id>] [--ascii] [--no-mouse]   # open beside you
+node dist/cli.js play     [--session <id>] [--ascii] [--no-mouse]   # play in this terminal
+node dist/cli.js install-statusline                                  # add the scoreboard
+node dist/cli.js remove-statusline                                   # remove it
+node dist/cli.js status   [--session <id>]                           # print game state
+node dist/cli.js simulate [--session <id>]                           # fake tool calls
+```
+
+Without `--session`, the CLI uses the Claude session that most recently
+received a prompt.
+
+| Flag | Effect |
+| --- | --- |
+| `--session <id>` | Attach to this Claude Code session |
+| `--ascii` | Plain ASCII art, for terminals that draw box characters badly |
+| `--no-mouse` | Keyboard only; clicks in the pane select text as usual |
+
+### Environment variables
+
+| Variable | Effect |
+| --- | --- |
+| `CLAUDE_ARCADE_ASCII=1` | Same as `--ascii` |
+| `CLAUDE_ARCADE_MOUSE=0` | Same as `--no-mouse` |
+| `CLAUDE_ARCADE_HOME=<dir>` | Keep game data somewhere other than `~/.claude-arcade` |
+
+## Try it without Claude
+
+You can play with fake tool calls, without using any tokens. Open two terminal
+panes in the plugin folder:
+
+```bash
+# pane 1: pretend to be Claude
+node dist/cli.js simulate
+
+# pane 2: play
+node dist/cli.js play --session simulated-session
+```
+
+## Supported terminals
+
+`/toolstorm` puts the game next to Claude in the best way it can find:
+
+| Where Claude is running | What happens |
+| --- | --- |
+| tmux | Splits the current window |
+| zellij | Opens a pane to the right |
+| WezTerm | Splits the current pane |
+| kitty | Splits the window (needs `allow_remote_control yes` in `kitty.conf`) |
+| Windows Terminal | Splits the current tab |
+| iTerm2 (macOS) | Splits the current session |
+| Terminal.app (macOS) | Opens a new window |
+| Other Windows consoles, e.g. the VS Code terminal | Opens a new console window |
+| Linux desktops | Opens a new terminal window (`x-terminal-emulator`, GNOME Terminal, Konsole, Alacritty, xterm) |
+
+If none of these apply, open a second pane yourself and run
+`node dist/cli.js play` there; it attaches to your most recent session.
+
+The game sizes its field when it starts. If you resize its pane, quit and start
+it again to use the new size.
+
+## Updating
+
+```bash
+claude plugin update toolstorm@toolstorm
+```
+
+Then restart Claude Code. Automatic updates are off by default for this
+marketplace; to turn them on, open `/plugin`, go to the marketplaces list and
+enable auto-update for `toolstorm`. If you installed the scoreboard, it keeps working
+across updates; there is nothing to reinstall.
+
+## Uninstalling
+
+1. Remove the scoreboard first, so your old status line is restored:
+   ```
+   /toolstorm remove
+   ```
+2. Uninstall the plugin:
+   ```
+   /plugin uninstall toolstorm@toolstorm
+   ```
+3. Optionally delete the game's data folder, which holds your high score:
+   `~/.claude-arcade` (on Windows, `%USERPROFILE%\.claude-arcade`).
+
+## Troubleshooting
+
+**The title says "standalone (no Claude session attached)".**
+The game could not tell which session to follow. Send Claude a prompt first,
+then run `/toolstorm` again. From a shell, pass the id with
+`--session <id>`.
+
+**Nothing happens in the game when Claude works.**
+- Restart Claude Code after installing: hooks only load at startup.
+- Check the plugin is enabled in `/plugin`.
+- Make sure `node` works from the shell Claude Code starts in.
+- The game only sees tool calls made after it opened.
+
+**`/toolstorm` says it could not find a terminal.**
+Open a second pane or window yourself and run the command it printed.
+
+**Windows Terminal opened the game in a different window.**
+The split is only used when Claude runs inside Windows Terminal itself. From
+other terminals, such as VS Code's, you get a separate console window.
+
+**kitty opened a new window instead of a split.**
+Add `allow_remote_control yes` to `kitty.conf` and restart kitty.
+
+**The game shows boxes or question marks instead of shapes.**
+Use `--ascii`, or set `CLAUDE_ARCADE_ASCII=1`.
+
+**I can't select text in the game pane.**
+Mouse control takes over clicks in that pane. Hold `Shift` while selecting
+(most terminals), or start the game with `--no-mouse`.
+
+**The terminal prints odd characters when I click after the game exits.**
+The game turns mouse reporting off on exit, but a forced kill can skip that.
+Run `reset` (macOS/Linux) or open a new tab.
+
+**`/toolstorm install` failed.**
+- *"Left your settings untouched"*: your `~/.claude/settings.json` is not valid
+  JSON. Fix it (often a trailing comma), or add the printed entry by hand.
+  Nothing was changed.
+- A permission or sandbox error: run it from Claude's prompt with `!` so it
+  runs as you:
+  `! node ~/.claude/plugins/cache/toolstorm/toolstorm/<version>/dist/cli.js install-statusline`
+
+**The scoreboard row doesn't appear.**
+Restart Claude Code or run `/statusline`. Check that `statusLine` in
+`~/.claude/settings.json` points at `toolstorm-statusline.js`.
+
+**The scoreboard says "paused — /toolstorm to resume".**
+The game pane was closed or frozen. Run `/toolstorm` to open it again.
+
+## Privacy and performance
+
+**What is stored.** Everything stays on your machine in `~/.claude-arcade`:
+
+| File | Contents |
+| --- | --- |
+| `sessions/<id>.jsonl` | Game events for a session: the tool name, a file name, the program a command ran (`npm test`, never its arguments) or a web host. Never query strings, search terms, file contents or command arguments. |
+| `sessions/<id>.state.json` | Score, wave and lives, for the scoreboard |
+| `highscore.json` | Your best score |
+| `current-session`, `plugin-dist` | Which session and plugin version are current |
+| `toolstorm-statusline.js`, `statusline-backup.json`, `settings-backup.json` | Only if you installed the scoreboard |
+
+Files are readable only by your user. Session files untouched for 7 days are
+deleted automatically, and an event log over 1 MB starts over. Nothing is sent
+over the network.
+
+**What it costs.** Each tool call starts one short background Node process,
+about 100 ms of CPU. When no game is open it reads one small file and exits
+without writing. The scoreboard adds about 70 ms every 2 seconds. None of it
+runs on Claude's critical path, so your session never waits on the game.
+
+## How it works
+
+Two facts about Claude Code shape the design:
+
+1. **Hooks have no terminal.** They run in the background, so a hook can never
+   draw a game or read a key.
+2. **Claude Code's interface owns the keyboard in its own pane.** A hook never
+   sees your keypresses there.
 
 So the game runs as a **separate process in its own pane**, where it owns a real
-keyboard. Hooks are only the event feed: each one appends a line to a per-session
-JSONL log, and the game tails it. A small state file flows back the other way so
-the **status line** can show a live scoreboard inside Claude's pane.
+keyboard and mouse. Hooks are only the event feed: each one appends a line to a
+per-session log, and the game reads new lines 24 times a second. A small state
+file flows back the other way, so the status line can show the score inside
+Claude's pane.
 
 ```
 Claude Code ──hooks──> ~/.claude-arcade/sessions/<id>.jsonl ──tail──> game pane
@@ -42,111 +420,26 @@ Claude Code ──hooks──> ~/.claude-arcade/sessions/<id>.jsonl ──tail�
                   status line <───────┴──── <id>.state.json <─────────────┘
 ```
 
-Every hook is registered `async: true`, so the game can never add latency to
-real work, and a crash in the game is invisible to your session. When no game
-is attached to the session, the hooks write nothing at all.
-
-## Install
-
-Requires Node 18+ (uses nothing outside the standard library).
-
-```bash
-# 1. add this repo as a marketplace and install the plugin
-/plugin marketplace add ItsRohith-A/claude-code-game
-/plugin install toolstorm
-
-# 2. add the live score HUD to your status line
-/toolstorm install
-
-# 3. restart Claude Code, then play
-/toolstorm
-```
-
-Step 2 is separate because a plugin **cannot** register a status line — Claude
-Code only honours `agent` and `subagentStatusLine` from a plugin's settings. The
-command writes a `statusLine` entry into your own `~/.claude/settings.json`:
-
-- It points at a small shim in `~/.claude-arcade/`, not into the plugin's
-  versioned install directory, so plugin updates do not break it.
-- Any status line you already had is saved, **keeps running** as the first row,
-  and comes back on `/toolstorm remove`.
-- A copy of the whole file is kept in `~/.claude-arcade/settings-backup.json`.
-- If `settings.json` is not valid JSON, nothing is written: the command tells
-  you, and prints the entry to add by hand.
-
-If Claude's sandbox blocks the write, run it yourself with
-`! node <plugin-root>/dist/cli.js install-statusline`.
-
-### Running from a clone instead
-
-```bash
-git clone <this repo> && cd claude-code-game
-npm install && npm run build
-claude --plugin-dir .
-```
-
-## How your work becomes the game
-
-| What Claude does | Hook | In the game |
-| --- | --- | --- |
-| You submit a prompt | `UserPromptSubmit` | A new wave begins |
-| `Edit`, `Write`, `NotebookEdit` | `PostToolUse` | **◆ bug** ×2 — 2 hp, 120 pts |
-| `Read`, `Grep`, `Glob`, `LSP` | `PostToolUse` | **▾ scout** — fast, 1 hp, 50 pts |
-| `WebFetch`, `WebSearch`, `Agent` | `PostToolUse` | **● probe** — 3 hp, shoots back, 240 pts |
-| A test/build/lint command passes | `PostToolUse` | A **power-up** drops |
-| Any other `Bash` command | `PostToolUse` | A scout |
-| A tool fails | `PostToolUseFailure` | **You take a hit** (not when you pressed Esc) |
-| Claude needs permission | `PermissionRequest` | **Game pauses:** "CLAUDE NEEDS YOU" |
-| Claude is idle or asks a question | `Notification` | **Game pauses** |
-| Claude finishes the turn | `Stop` | **Wave clear**, +250 × wave bonus |
-
-A command counts as verification when one of its steps *starts with* a test,
-build or lint runner — `npm test`, `pnpm run build`, `pytest`, `cargo test`,
-`go test`, `tsc`, `make`, and similar. `cd web && npm test` counts;
-`git commit -m "make it build"` does not. See `VERIFICATION` in `src/events.ts`.
-
-The permission banner clears once the tool it was waiting on finishes, or once
-Claude has clearly moved on.
-
-Power-ups: **S** shield (absorbs one hit), **W** spread shot, **R** rapid fire,
-**+** extra life. You collect one by standing under it as it reaches the floor.
-
-Enemies that reach the floor break through and cost a heart, so a long burst of
-Claude edits genuinely raises the pressure.
-
-## Controls
-
-| Key | Action |
+| Hook | Becomes |
 | --- | --- |
-| Mouse pointer, or `←` `→`, `A` `D`, `h` `l` | Move — the ship follows the pointer |
-| Hold left click, or `SPACE` `↑` `W` | Fire — holding the button keeps firing |
-| Right click or `P` | Pause, and dismiss the "Claude needs you" banner |
-| `R` | Restart after a game over |
-| `Q` or `Ctrl+C` | Quit |
+| `SessionStart` | New run; clean up old sessions |
+| `UserPromptSubmit` | Wave starts |
+| `PostToolUse` | Enemy or power-up, by tool |
+| `PostToolUseFailure` | Hit (unless you interrupted) |
+| `PermissionRequest` | Pause until that tool call finishes |
+| `Notification` | Pause when Claude is idle or asks a question |
+| `Stop` | Wave clear |
+| `SessionEnd` | Run ends |
 
-## Commands
-
-```bash
-/toolstorm                  # launch the game beside Claude, attached to this session
-/toolstorm install          # add the score HUD to your status line
-/toolstorm remove           # restore your previous status line
-/toolstorm status           # print the live game state
-```
-
-Directly, without Claude:
+## Development
 
 ```bash
-node dist/cli.js launch --session <id>   # split the pane / open a window
-node dist/cli.js play --session <id>     # run in the current terminal
-node dist/cli.js simulate   # fake tool calls, to try it with no session
-node dist/cli.js play --ascii   # box-drawing-free fallback
-node dist/cli.js play --no-mouse   # keyboard only
+npm install        # TypeScript and Node types; the plugin itself has no dependencies
+npm run build      # compile src/ to dist/
+npm test           # build, then run the test suites
+npm run watch      # rebuild on save
+claude --plugin-dir .   # load your working copy in Claude Code
 ```
-
-To try it end to end with no Claude session at all, run `simulate` in one pane
-and `play --session simulated-session` in another.
-
-## Layout
 
 ```
 src/
@@ -154,49 +447,25 @@ src/
 ├── paths.ts         where state lives (~/.claude-arcade, or $CLAUDE_ARCADE_HOME)
 ├── bus.ts           append-only event log, incremental tailing reader
 ├── hook.ts          hook entrypoint: tool call -> game event
-├── statusline.ts    the two-row in-pane HUD
+├── statusline.ts    the two-row in-pane scoreboard
 ├── cli.ts           launch / install / simulate
 └── game/
     ├── engine.ts    the simulation, with no I/O in it
     ├── render.ts    engine state -> one ANSI frame
-    ├── input.ts     raw-mode keyboard
-    └── main.ts      the 24fps loop that ties them together
+    ├── input.ts     raw-mode keyboard and SGR mouse decoding
+    └── main.ts      the 24 fps loop that ties them together
 hooks/hooks.json     the eight async hooks that feed the game
-skills/toolstorm/    the /toolstorm slash command
+skills/toolstorm/    the /toolstorm command
 test/                node:test suites, run against dist/
 ```
 
-`dist/` is committed, because plugins are installed from a repo with no build
-step. Run `npm run build` after changing anything in `src/`, and `npm test`
-before committing; CI checks that `dist/` matches the source.
+- **Commit `dist/`.** Plugins install straight from the repository with no
+  build step. CI fails if `dist/` does not match `src/`.
+- **Bump `version`** in `.claude-plugin/plugin.json` (and `package.json`) for
+  every release. Installed copies stay on the old version until it changes.
+- Validate the manifests with `claude plugin validate --strict .`.
 
-## Notes and limits
+## License
 
-- **The game pane must be a real terminal pane.** Inside tmux, zellij,
-  WezTerm, kitty (with remote control on), iTerm or Windows Terminal the
-  launcher splits your current window; elsewhere it opens a new one. If it
-  cannot find a terminal, run `node dist/cli.js play` yourself in a spare pane.
-- **The status-line HUD updates every 2 seconds** (`refreshInterval`), plus on
-  every assistant message. Raise or lower it in `settings.json`.
-- **Cost of running it.** Each hook is a short-lived Node process, about 100 ms
-  of CPU, and one fires per tool call. With no game attached it reads one small
-  file and exits without writing. The HUD adds ~70 ms every 2 s. None of it is
-  on the critical path, because every hook sets `async: true`, so your session
-  never waits on the game.
-- **Resizing the game pane mid-run does not resize the field.** The field is
-  sized once at launch and clipped if the pane shrinks; restart the game to
-  pick up a new size.
-- **What lands on disk.** The event log keeps file names, the program a command
-  ran (`npm test`, never its arguments) and URL hosts. Never query strings,
-  search terms or command arguments. Files are private to your user, and
-  session files untouched for 7 days are deleted.
-- **Attaching mid-session does not replay history** — you start from the next
-  tool call, not from an hour of backlog.
-- Unicode box-drawing and geometric glyphs are the default; pass `--ascii` (or
-  set `CLAUDE_ARCADE_ASCII=1`) on terminals that render them badly.
-- **Mouse control** uses SGR mouse reporting, which Windows Terminal, iTerm,
-  kitty, WezTerm, Alacritty, GNOME Terminal and xterm all support. While the
-  game runs, the pane's clicks go to the game instead of selecting text (hold
-  `Shift` to select in most terminals). Pass `--no-mouse` or set
-  `CLAUDE_ARCADE_MOUSE=0` to turn it off.
-- High scores live in `~/.claude-arcade/highscore.json`.
+MIT — see [LICENSE](LICENSE). Free to use, copy and change, as long as the
+copyright notice stays with the code.

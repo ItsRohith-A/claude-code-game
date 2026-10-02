@@ -1,8 +1,9 @@
 {
   "name": "toolstorm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "TOOLSTORM - a terminal arcade shooter fueled by Claude Code's tool calls",
+  "license": "MIT",
   "type": "commonjs",
   "engines": {
     "node": ">=18"
@@ -15,7 +16,7 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "typescript": "^5.7.0"
+    "@types/node": "22.20.4",
+    "typescript": "5.9.3"
   }
 }
