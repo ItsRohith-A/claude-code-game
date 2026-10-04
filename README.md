@@ -415,8 +415,8 @@ node dist/cli.js play --session simulated-session
 If none of these apply, open a second pane yourself and run
 `node dist/cli.js play` there; it attaches to your most recent session.
 
-The game sizes its field for each run. If you resize its pane, the next run
-(after a game over, or from the menu) uses the new size.
+The game fits itself to its pane, and follows it live if you resize the pane
+mid-run.
 
 ## Updating
 

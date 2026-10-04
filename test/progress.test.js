@@ -216,3 +216,10 @@ test("daily runs are always medium, whatever the setting", () => {
   assert.equal(a.engine.difficulty.id, "hard");
   assert.equal(a.engine.lives, 2);
 });
+
+test("a resize reaches the run in progress", () => {
+  const a = app({ startMode: "endless" });
+  a.resize(30, 14);
+  assert.equal(a.engine.width, 30);
+  assert.equal(a.engine.height, 14);
+});

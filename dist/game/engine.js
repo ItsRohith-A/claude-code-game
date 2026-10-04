@@ -83,6 +83,7 @@ const SPAWN_EVENTS = {
  */
 const ATTENTION_SETTLE_MS = 1500;
 class Engine {
+    /** Field size in cells. Changes when the pane is resized mid-run. */
     width;
     height;
     mode;
@@ -180,6 +181,35 @@ class Engine {
         }
         this.pushLog(this.mode.claudeFed ? "new run - good luck" : "daily run - same seed for all", "green");
         this.banner(this.mutator.name ? `${this.mode.name}: ${this.mutator.name}` : "GET READY");
+    }
+    /**
+     * Fit the run to a new field size. A split pane often shrinks just after
+     * the game starts, so this happens at the start of most runs, not only
+     * when someone drags a divider. Anything left outside the new field is
+     * dropped quietly: shrinking the pane must never cost a life.
+     */
+    resize(width, height) {
+        if (width === this.width && height === this.height)
+            return;
+        this.width = width;
+        this.height = height;
+        const inside = (x, y) => x >= 0 && x < width && y < height - 1;
+        this.playerX = Math.max(1, Math.min(width - 2, this.playerX));
+        this.enemies = this.enemies.filter((e) => e.type === "boss" || e.y < height - 3);
+        for (const e of this.enemies)
+            e.x = Math.max(1, Math.min(width - 2, e.x));
+        this.bullets = this.bullets.filter((b) => inside(b.x, b.y));
+        this.enemyBullets = this.enemyBullets.filter((b) => inside(b.x, b.y));
+        this.powerups = this.powerups.filter((p) => p.y < height - 2);
+        for (const p of this.powerups)
+            p.x = Math.max(1, Math.min(width - 2, p.x));
+        this.particles = this.particles.filter((p) => inside(p.x, p.y));
+        this.popups = this.popups.filter((p) => inside(p.x, p.y));
+        const starCount = Math.floor((width * height) / 28);
+        this.stars = this.stars.filter((s) => inside(s.x, s.y)).slice(0, starCount);
+        while (this.stars.length < starCount) {
+            this.stars.push({ x: this.rng() * width, y: this.rng() * height, speed: 1 + this.rng() * 5 });
+        }
     }
     // ---------------------------------------------------------------- input ---
     apply(command) {

@@ -200,3 +200,18 @@ test("hard is faster, tougher and pays more than easy", () => {
   assert.equal(easy.lives, 5);
   assert.equal(hard.lives, 2);
 });
+
+test("shrinking the pane mid-run refits the field without costing a life", () => {
+  const e = new Engine(90, 30, { rng: seededRng(7) });
+  e.moveTo(85);
+  e.ingest({ kind: "bug", at, tool: "Edit", weight: 6 });
+  run(e, 3);
+  e.enemies.push({ id: 999, type: "scout", x: 80, y: 27, vx: 0, vy: 0, hp: 1, maxHp: 1, hitFlash: 0, fireIn: 9, age: 0, points: 50 });
+  e.resize(40, 20);
+  assert.equal(e.width, 40);
+  assert.equal(e.playerX, 38);
+  assert.ok(e.enemies.every((x) => x.x >= 1 && x.x <= 38 && x.y < 17));
+  assert.ok(e.stars.every((s) => s.x < 40 && s.y < 20));
+  run(e, 0.5);
+  assert.equal(e.lives, 3);
+});

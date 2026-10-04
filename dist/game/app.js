@@ -57,10 +57,11 @@ class App {
         if (options.startMode)
             this.startRun(options.startMode);
     }
-    /** A new terminal size applies from the next run on. */
+    /** Fit the screen, and the run in progress, to a new terminal size. */
     resize(width, height) {
         this.width = width;
         this.height = height;
+        this.engine?.resize(width, height);
     }
     // ---------------------------------------------------------------- input ---
     handle(command) {

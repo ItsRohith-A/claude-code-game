@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 — 2026-10-04
+
+### Fixed
+
+- In a freshly split pane the field kept the width of the whole window, so
+  its right border and the side panel were cut off and enemies fell past the
+  visible edge. The field now follows the pane's size live, mid-run.
+
 ## 0.3.0 — 2026-10-03
 
 The big one: TOOLSTORM grows from a single endless field into a full arcade
@@ -49,8 +57,7 @@ game with modes, bosses and progress that carries between sessions.
 - Enemy speed grew without limit with every Claude turn, so long sessions
   became unplayable. It is now capped.
 - Tool calls during game over queued enemies for nobody.
-- Resizing the pane did nothing until a restart; each new run now uses the
-  current size.
+- Resizing the pane did nothing until a restart.
 
 ### Changed
 

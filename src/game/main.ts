@@ -124,20 +124,27 @@ function main(): void {
   process.stdout.on("drain", () => {
     writable = true;
   });
-  process.stdout.on("resize", () => {
-    columns = process.stdout.columns ?? columns;
-    rows = process.stdout.rows ?? rows;
-    // The run in progress keeps its field; the next one uses the new size.
+  const fitTerminal = (): void => {
+    const nextColumns = process.stdout.columns ?? columns;
+    const nextRows = process.stdout.rows ?? rows;
+    if (nextColumns === columns && nextRows === rows) return;
+    columns = nextColumns;
+    rows = nextRows;
     const next = pickFieldSize(columns, rows);
     app.resize(next.width, next.height);
     // Whatever the old size left on screen is now in the wrong place.
     process.stdout.write(CLEAR);
-  });
+  };
+  process.stdout.on("resize", fitTerminal);
 
   process.stdout.write(ENTER_SCREEN);
 
   timer = setInterval(() => {
     if (!running) return;
+
+    // A fresh split pane shrinks just after we start. The resize event covers
+    // that; checking every frame is a cheap safety net in case one is missed.
+    fitTerminal();
 
     const now = Date.now();
     // Clamp dt so a stalled pane (laptop sleep, scheduler hiccup) does not
