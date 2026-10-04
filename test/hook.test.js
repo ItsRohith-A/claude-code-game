@@ -51,10 +51,19 @@ test("a live game receives tool events", (t) => {
   hook(box, "post-tool", { session_id: "s2", tool_name: "Bash", tool_input: { command: "npm test" } });
   hook(box, "permission-request", { session_id: "s2", tool_name: "Bash", tool_use_id: "t9" });
   const events = log(box, "s2");
-  assert.deepEqual(events.map((e) => e.kind), ["bug", "scout", "powerup", "attention"]);
+  assert.deepEqual(events.map((e) => e.kind), ["bug", "diver", "powerup", "attention"]);
   assert.equal(events[0].id, "t1");
   assert.equal(events[0].label, "a.ts");
   assert.equal(events[3].id, "t9");
+});
+
+test("subagents and compaction send an ally and a supply drop", (t) => {
+  const box = tempHome();
+  t.after(box.cleanup);
+  startGame(box, "s4");
+  hook(box, "subagent-stop", { session_id: "s4" });
+  hook(box, "pre-compact", { session_id: "s4" });
+  assert.deepEqual(log(box, "s4").map((e) => e.kind), ["ally", "supply"]);
 });
 
 test("an interrupted tool costs no heart", (t) => {

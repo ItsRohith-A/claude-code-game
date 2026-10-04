@@ -112,11 +112,11 @@ async function main(): Promise<void> {
     case "post-tool": {
       if (!tool) break;
       // A Bash call only earns a power-up when it actually verified something;
-      // otherwise it is just another thing that moved on screen.
+      // any other command sends a diver after the ship.
       if (tool === "Bash" || tool === "PowerShell") {
         const command = payload.tool_input?.["command"];
         if (typeof command !== "string" || !isVerificationCommand(command)) {
-          publish(sessionId, { kind: "scout", tool, id, label, weight: 1 });
+          publish(sessionId, { kind: "diver", tool, id, label, weight: 1 });
           break;
         }
       }
@@ -152,6 +152,14 @@ async function main(): Promise<void> {
 
     case "stop":
       publish(sessionId, { kind: "wave_clear" });
+      break;
+
+    case "subagent-stop":
+      publish(sessionId, { kind: "ally", label: "a subagent reported back" });
+      break;
+
+    case "pre-compact":
+      publish(sessionId, { kind: "supply", label: "context compacted" });
       break;
 
     case "session-end":

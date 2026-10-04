@@ -39,6 +39,7 @@ exports.eventLogPath = eventLogPath;
 exports.statePath = statePath;
 exports.currentSessionPath = currentSessionPath;
 exports.highScorePath = highScorePath;
+exports.profilePath = profilePath;
 exports.pluginRootPointerPath = pluginRootPointerPath;
 exports.statuslineShimPath = statuslineShimPath;
 exports.statuslineBackupPath = statuslineBackupPath;
@@ -74,6 +75,10 @@ function currentSessionPath() {
 }
 function highScorePath() {
     return path.join(rootDir(), "highscore.json");
+}
+/** Level, totals, achievements, leaderboards and the chosen ship. */
+function profilePath() {
+    return path.join(rootDir(), "profile.json");
 }
 /**
  * Where the plugin's current dist/ lives. Hooks refresh it on every session

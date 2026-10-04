@@ -1,19 +1,22 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.colorCode = colorCode;
-exports.paint = paint;
+exports.paint = exports.colorCode = void 0;
+exports.themeFor = themeFor;
 exports.pickFieldSize = pickFieldSize;
 exports.renderFrame = renderFrame;
-const events_1 = require("../events");
+const content_1 = require("./content");
 const engine_1 = require("./engine");
+const grid_1 = require("./grid");
+var grid_2 = require("./grid");
+Object.defineProperty(exports, "colorCode", { enumerable: true, get: function () { return grid_2.colorCode; } });
+Object.defineProperty(exports, "paint", { enumerable: true, get: function () { return grid_2.paint; } });
 const UNICODE = {
-    scout: "▾",
-    bug: "◆",
-    probe: "●",
     player: "▲",
+    wingman: "◇",
     bullet: "│",
+    laser: "┃",
     enemyBullet: "•",
-    shield: "(",
+    star: "·",
     hLine: "─",
     vLine: "│",
     tl: "┌",
@@ -22,17 +25,19 @@ const UNICODE = {
     br: "┘",
     heart: "♥",
     emptyHeart: "♡",
+    bomb: "✹",
     barFull: "█",
     barEmpty: "░",
+    left: "←",
+    right: "→",
 };
 const ASCII = {
-    ...UNICODE,
-    scout: "v",
-    bug: "#",
-    probe: "O",
     player: "A",
+    wingman: "o",
     bullet: "|",
-    enemyBullet: "!",
+    laser: "!",
+    enemyBullet: "*",
+    star: ".",
     hLine: "-",
     vLine: "|",
     tl: "+",
@@ -41,31 +46,14 @@ const ASCII = {
     br: "+",
     heart: "*",
     emptyHeart: "-",
+    bomb: "@",
     barFull: "#",
     barEmpty: ".",
+    left: "A",
+    right: "D",
 };
-const COLORS = {
-    reset: "\x1b[0m",
-    dim: "\x1b[90m",
-    white: "\x1b[97m",
-    red: "\x1b[91m",
-    green: "\x1b[92m",
-    yellow: "\x1b[93m",
-    blue: "\x1b[94m",
-    magenta: "\x1b[95m",
-    cyan: "\x1b[96m",
-    bold: "\x1b[1m",
-};
-/** Erase to end of line, so a shorter frame leaves no stale characters. */
-const CLEAR_EOL = "\x1b[K";
-const RESET = COLORS.reset;
-/** ANSI code for a theme colour name, or "" when the name is unknown. */
-function colorCode(name) {
-    return COLORS[name] ?? "";
-}
-function paint(text, color) {
-    const code = colorCode(color);
-    return code ? `${code}${text}${RESET}` : text;
+function themeFor(ascii) {
+    return ascii ? ASCII : UNICODE;
 }
 const PANEL_WIDTH = 28;
 /** Below this terminal width the work log moves under the field. */
@@ -81,166 +69,143 @@ function pickFieldSize(columns, rows) {
 function clamp(value, lo, hi) {
     return Math.max(lo, Math.min(hi, value));
 }
-function blankRow(width) {
-    const row = new Array(width);
-    for (let i = 0; i < width; i++)
-        row[i] = { ch: " ", color: "" };
-    return row;
+function enemyGlyph(theme, e) {
+    const spec = content_1.ENEMY_SPECS[e.type];
+    return theme === ASCII ? spec.ascii : spec.glyph;
 }
-function put(grid, x, y, ch, color) {
-    const row = grid[y];
-    if (!row)
-        return;
-    if (x < 0 || x >= row.length)
-        return;
-    row[x] = { ch, color };
-}
-function putText(grid, x, y, text, color) {
-    for (let i = 0; i < text.length; i++)
-        put(grid, x + i, y, text[i] ?? " ", color);
-}
-/**
- * Clipped to the terminal: the field is sized once at launch, and a frame
- * wider or taller than a shrunken pane would wrap and scroll into garbage.
- */
-function serialize(grid, columns, rows) {
-    const out = [];
-    for (const row of grid.slice(0, Math.max(1, rows))) {
-        let line = "";
-        let current = "";
-        for (const cell of row.slice(0, Math.max(1, columns))) {
-            if (cell.color !== current) {
-                if (current)
-                    line += RESET;
-                const code = colorCode(cell.color);
-                line += code;
-                current = code ? cell.color : "";
-            }
-            line += cell.ch;
-        }
-        if (current)
-            line += RESET;
-        out.push(line + CLEAR_EOL);
-    }
-    return out.join("\r\n");
-}
-function glyphForEnemy(theme, type) {
-    return type === "scout" ? theme.scout : type === "bug" ? theme.bug : theme.probe;
-}
-function colorForEnemy(type) {
-    return type === "scout" ? "cyan" : type === "bug" ? "magenta" : "yellow";
-}
-function powerupGlyph(type) {
-    switch (type) {
-        case "shield":
-            return { ch: "S", color: "cyan" };
-        case "spread":
-            return { ch: "W", color: "yellow" };
-        case "rapid":
-            return { ch: "R", color: "green" };
-        case "life":
-            return { ch: "+", color: "magenta" };
-    }
+function skinColor(skin, clock) {
+    return skin.color === "rainbow" ? (content_1.RAINBOW[Math.floor(clock * 8) % content_1.RAINBOW.length] ?? "green") : skin.color;
 }
 function renderFrame(engine, opts) {
-    const theme = opts.ascii ? ASCII : UNICODE;
+    const theme = themeFor(opts.ascii);
     const showPanel = opts.columns >= PANEL_MIN_TERMINAL;
     const boxWidth = engine.width + 2;
     const totalWidth = boxWidth + (showPanel ? PANEL_WIDTH + 1 : 0);
     const totalHeight = 1 + engine.height + 2 + 3;
-    const grid = [];
-    for (let y = 0; y < totalHeight; y++)
-        grid.push(blankRow(totalWidth));
+    const grid = (0, grid_1.makeGrid)(totalWidth, totalHeight);
+    const fever = engine.feverTime > 0;
+    const pulse = content_1.RAINBOW[Math.floor(engine.clock * 10) % content_1.RAINBOW.length] ?? "magenta";
     // ---- title -------------------------------------------------------------
     const title = "TOOLSTORM";
-    putText(grid, 0, 0, title, "bold");
-    putText(grid, title.length + 1, 0, theme.vLine, "dim");
-    const subtitle = opts.attached
-        ? `live: ${opts.sessionLabel}`
-        : "standalone (no Claude session attached)";
-    putText(grid, title.length + 3, 0, subtitle, opts.attached ? "green" : "dim");
+    (0, grid_1.putText)(grid, 0, 0, title, "bold");
+    (0, grid_1.putText)(grid, title.length + 1, 0, theme.vLine, "dim");
+    let tx = title.length + 3;
+    const modeTag = engine.mutator.name
+        ? `${engine.mode.name}: ${engine.mutator.name}`
+        : `${engine.mode.name} ${engine.difficulty.name}`;
+    (0, grid_1.putText)(grid, tx, 0, modeTag, "yellow");
+    tx += (0, grid_1.textWidth)(modeTag) + 1;
+    (0, grid_1.putText)(grid, tx, 0, theme.vLine, "dim");
+    tx += 2;
+    const subtitle = opts.attached ? `live: ${opts.sessionLabel}` : "standalone";
+    (0, grid_1.putText)(grid, tx, 0, subtitle, opts.attached ? "green" : "dim");
+    const lvl = `LVL ${opts.level}`;
+    // On a narrow pane the level gives way rather than overwrite the mode.
+    if (tx + (0, grid_1.textWidth)(subtitle) + 1 < boxWidth - lvl.length)
+        (0, grid_1.putText)(grid, boxWidth - lvl.length, 0, lvl, "cyan");
     // ---- field box ---------------------------------------------------------
     const boxTop = 1;
     const fieldTop = boxTop + 1;
-    put(grid, 0, boxTop, theme.tl, "dim");
-    put(grid, boxWidth - 1, boxTop, theme.tr, "dim");
-    for (let x = 1; x < boxWidth - 1; x++)
-        put(grid, x, boxTop, theme.hLine, "dim");
     const boxBottom = fieldTop + engine.height;
-    put(grid, 0, boxBottom, theme.bl, "dim");
-    put(grid, boxWidth - 1, boxBottom, theme.br, "dim");
-    for (let x = 1; x < boxWidth - 1; x++)
-        put(grid, x, boxBottom, theme.hLine, "dim");
-    const borderColor = engine.shakeTime > 0 ? "red" : "dim";
+    const flash = engine.flashTime > 0;
+    const borderColor = flash ? "yellow" : engine.shakeTime > 0 ? "red" : fever ? pulse : "dim";
+    (0, grid_1.put)(grid, 0, boxTop, theme.tl, borderColor);
+    (0, grid_1.put)(grid, boxWidth - 1, boxTop, theme.tr, borderColor);
+    (0, grid_1.put)(grid, 0, boxBottom, theme.bl, borderColor);
+    (0, grid_1.put)(grid, boxWidth - 1, boxBottom, theme.br, borderColor);
+    for (let x = 1; x < boxWidth - 1; x++) {
+        (0, grid_1.put)(grid, x, boxTop, theme.hLine, borderColor);
+        (0, grid_1.put)(grid, x, boxBottom, theme.hLine, borderColor);
+    }
     for (let y = fieldTop; y < boxBottom; y++) {
-        put(grid, 0, y, theme.vLine, borderColor);
-        put(grid, boxWidth - 1, y, theme.vLine, borderColor);
+        (0, grid_1.put)(grid, 0, y, theme.vLine, borderColor);
+        (0, grid_1.put)(grid, boxWidth - 1, y, theme.vLine, borderColor);
     }
-    const fx = (x) => 1 + Math.round(x);
+    // Shake nudges the whole field a cell sideways.
+    const shake = engine.shakeTime > 0 ? (Math.floor(engine.clock * 30) % 2 === 0 ? 1 : -1) : 0;
+    const fx = (x) => 1 + Math.round(x) + shake;
     const fy = (y) => fieldTop + Math.round(y);
+    /** Draw inside the field only: anything above or beside it is clipped. */
+    const field = (x, y, ch, color) => {
+        const gx = fx(x);
+        const gy = fy(y);
+        if (gx < 1 || gx > engine.width || gy < fieldTop || gy >= boxBottom)
+            return;
+        (0, grid_1.put)(grid, gx, gy, ch, color);
+    };
+    const fieldText = (x, y, text, color) => {
+        let i = 0;
+        for (const ch of text)
+            field(x + i++, y, ch, color);
+    };
     // ---- field contents ----------------------------------------------------
-    for (const p of engine.particles) {
-        put(grid, fx(p.x), fy(p.y), p.glyph, p.color);
+    for (const s of engine.stars) {
+        field(s.x, s.y, s.speed > 4 ? "." : theme.star, s.speed > 4.5 && fever ? pulse : "dim");
     }
-    for (const b of engine.bullets) {
-        put(grid, fx(b.x), fy(b.y), theme.bullet, "white");
-    }
-    for (const b of engine.enemyBullets) {
-        put(grid, fx(b.x), fy(b.y), theme.enemyBullet, "red");
-    }
-    for (const p of engine.powerups) {
-        const g = powerupGlyph(p.type);
-        put(grid, fx(p.x), fy(p.y), g.ch, g.color);
-    }
-    for (const e of engine.enemies) {
-        const hurt = e.hitFlash > 0;
-        put(grid, fx(e.x), fy(e.y), glyphForEnemy(theme, e.type), hurt ? "white" : colorForEnemy(e.type));
-        // Damaged multi-hit enemies carry a pip so you can see what is nearly dead.
-        if (engine_1.ENEMY_SPECS[e.type].hp > 1 && e.hp < engine_1.ENEMY_SPECS[e.type].hp) {
-            put(grid, fx(e.x) + 1, fy(e.y), String(e.hp), "dim");
+    if (flash) {
+        for (let y = 0; y < engine.height; y++) {
+            for (let x = 0; x < engine.width; x++) {
+                if ((x * 7 + y * 13 + Math.floor(engine.clock * 20)) % 6 === 0)
+                    field(x, y, "*", y % 2 ? "yellow" : "white");
+            }
         }
     }
+    for (const p of engine.particles)
+        field(p.x, p.y, p.glyph, p.color);
+    for (const b of engine.bullets) {
+        field(b.x, b.y, b.pierce ? theme.laser : theme.bullet, b.ally ? "cyan" : b.pierce ? "magenta" : fever ? pulse : "white");
+    }
+    for (const b of engine.enemyBullets)
+        field(b.x, b.y, theme.enemyBullet, "red");
+    for (const p of engine.powerups) {
+        const spec = content_1.POWERUP_SPECS[p.type];
+        const blink = Math.floor(engine.clock * 6) % 2 === 0;
+        field(p.x, p.y, spec.letter, blink ? spec.color : "white");
+    }
+    for (const e of engine.enemies)
+        drawEnemy(e, theme, field, fieldText);
+    for (const p of engine.popups)
+        fieldText(p.x - Math.floor(p.text.length / 2), p.y, p.text, p.color);
     // Player: blink while invulnerable, show a bracket when shielded.
     const playerRow = engine.height - 2;
     const blinkOff = engine.invulnTime > 0 && Math.floor(engine.invulnTime * 10) % 2 === 0;
     if (!blinkOff) {
-        put(grid, fx(engine.playerX), fy(playerRow), theme.player, "green");
-        if (engine.shieldTime > 0) {
-            put(grid, fx(engine.playerX) - 1, fy(playerRow), "(", "cyan");
-            put(grid, fx(engine.playerX) + 1, fy(playerRow), ")", "cyan");
+        const glyph = opts.ascii ? opts.skin.ascii : opts.skin.glyph;
+        field(engine.playerX, playerRow, glyph, fever ? pulse : skinColor(opts.skin, engine.clock));
+        if (engine.timers.shield > 0) {
+            field(engine.playerX - 1, playerRow, "(", "cyan");
+            field(engine.playerX + 1, playerRow, ")", "cyan");
         }
+        // A flicker of exhaust under the ship.
+        if (Math.floor(engine.clock * 12) % 2 === 0)
+            field(engine.playerX, playerRow + 1, "'", fever ? pulse : "yellow");
+    }
+    if (engine.timers.wingman > 0)
+        field(engine.wingmanX(), playerRow, theme.wingman, "cyan");
+    // ---- boss bar, in the top border ---------------------------------------
+    const boss = engine.boss();
+    if (boss?.boss) {
+        const name = ` ${boss.boss.spec.name} `;
+        const barWidth = Math.max(6, Math.min(30, engine.width - name.length - 6));
+        const start = 1 + Math.max(1, Math.floor((engine.width - name.length - barWidth - 1) / 2));
+        (0, grid_1.putText)(grid, start, boxTop, name, boss.boss.spec.color);
+        (0, grid_1.putBar)(grid, start + name.length, boxTop, barWidth, boss.hp / boss.maxHp, "red", theme.barFull, theme.barEmpty);
+        (0, grid_1.put)(grid, start + name.length + barWidth, boxTop, " ", "");
+    }
+    // ---- toast, in the bottom border ---------------------------------------
+    const toast = engine.toasts[0];
+    if (toast) {
+        const text = (0, grid_1.clip)(` ★ ${toast.title}: ${toast.text} `, engine.width - 2);
+        (0, grid_1.putCentered)(grid, boxBottom, opts.ascii ? text.replace("★", "*") : text, toast.color, 1, engine.width);
     }
     // ---- overlays ----------------------------------------------------------
-    if (engine.status === "attention") {
-        overlay(grid, fieldTop, engine.height, boxWidth, [
-            { text: "CLAUDE NEEDS YOU", color: "yellow" },
-            { text: engine.attentionNote.slice(0, engine.width - 4), color: "white" },
-            { text: "", color: "" },
-            { text: "switch to Claude, then press P here", color: "dim" },
-        ]);
-    }
-    else if (engine.status === "gameover") {
-        overlay(grid, fieldTop, engine.height, boxWidth, [
-            { text: "GAME OVER", color: "red" },
-            { text: `score ${engine.score}`, color: "white" },
-            {
-                text: engine.score >= opts.highScore ? "NEW HIGH SCORE" : `best ${opts.highScore}`,
-                color: engine.score >= opts.highScore ? "yellow" : "dim",
-            },
-            { text: "", color: "" },
-            { text: "R restart    Q quit", color: "dim" },
-        ]);
-    }
-    else if (engine.status === "paused") {
-        overlay(grid, fieldTop, engine.height, boxWidth, [
-            { text: "PAUSED", color: "cyan" },
-            { text: "P to resume", color: "dim" },
-        ]);
+    const lines = overlayLines(engine, opts);
+    if (lines) {
+        overlay(grid, fieldTop, engine.height, boxWidth, lines);
     }
     else if (engine.bannerTime > 0 && engine.bannerText) {
         const y = fieldTop + Math.floor(engine.height / 2);
-        const x = 1 + Math.max(0, Math.floor((engine.width - engine.bannerText.length) / 2));
-        putText(grid, x, y, engine.bannerText, "yellow");
+        (0, grid_1.putCentered)(grid, y, engine.bannerText, fever ? pulse : "yellow", 1, engine.width);
     }
     // ---- HUD ---------------------------------------------------------------
     const hud1 = boxBottom + 1;
@@ -248,77 +213,152 @@ function renderFrame(engine, opts) {
     cursor = putSeg(grid, cursor, hud1, "SCORE", String(engine.score).padStart(6, "0"), "white");
     cursor = putSeg(grid, cursor, hud1, "BEST", String(Math.max(opts.highScore, engine.score)), "dim");
     cursor = putSeg(grid, cursor, hud1, "WAVE", String(engine.wave), "cyan");
-    putText(grid, cursor, hud1, "LIVES", "dim");
+    (0, grid_1.putText)(grid, cursor, hud1, "LIVES", "dim");
     cursor += 6;
-    for (let i = 0; i < events_1.MAX_LIVES; i++) {
-        const alive = i < engine.lives;
-        put(grid, cursor + i, hud1, alive ? theme.heart : theme.emptyHeart, alive ? "red" : "dim");
+    if (engine.mode.invincible) {
+        (0, grid_1.putText)(grid, cursor, hud1, "ZEN", "green");
+        cursor += 4;
     }
-    cursor += events_1.MAX_LIVES + 1;
-    if (engine.combo >= 2) {
-        const mult = 1 + Math.floor(engine.combo / 5) * 0.5;
-        putText(grid, cursor, hud1, `COMBO x${engine.combo} (${mult.toFixed(1)}x)`, "yellow");
+    else {
+        for (let i = 0; i < engine.maxLives; i++) {
+            const alive = i < engine.lives;
+            (0, grid_1.put)(grid, cursor + i, hud1, alive ? theme.heart : theme.emptyHeart, alive ? "red" : "dim");
+        }
+        cursor += engine.maxLives + 1;
     }
-    // Power-up timers.
+    (0, grid_1.putText)(grid, cursor + 1, hud1, "BOMBS", "dim");
+    cursor += 7;
+    for (let i = 0; i < engine_1.MAX_BOMBS; i++) {
+        (0, grid_1.put)(grid, cursor + i, hud1, i < engine.bombs ? theme.bomb : theme.star, i < engine.bombs ? "red" : "dim");
+    }
+    // Combo, fever and the power-up timers.
     const hud2 = boxBottom + 2;
     let px = 0;
-    px = putTimer(grid, px, hud2, theme, "SHIELD", engine.shieldTime, 10, "cyan");
-    px = putTimer(grid, px, hud2, theme, "SPREAD", engine.spreadTime, 12, "yellow");
-    putTimer(grid, px, hud2, theme, "RAPID", engine.rapidTime, 12, "green");
-    putText(grid, 0, boxBottom + 3, opts.mouse
-        ? "move " + arrowHint(opts.ascii) + "/mouse  fire SPACE/click  pause P  quit Q"
-        : "move " + arrowHint(opts.ascii) + "  fire SPACE  pause P  quit Q", "dim");
+    if (fever) {
+        (0, grid_1.putText)(grid, px, hud2, "FEVER", pulse);
+        (0, grid_1.putBar)(grid, px + 6, hud2, 6, engine.feverTime / 8, pulse, theme.barFull, theme.barEmpty);
+        px += 14;
+    }
+    if (engine.combo >= 2) {
+        const text = `x${engine.combo} ${engine.multiplier().toFixed(1)}x`;
+        (0, grid_1.putText)(grid, px, hud2, text, "yellow");
+        px += text.length + 2;
+    }
+    for (const type of content_1.TIMED_POWERUPS) {
+        const left = engine.timers[type];
+        if (left <= 0)
+            continue;
+        const spec = content_1.POWERUP_SPECS[type];
+        (0, grid_1.putText)(grid, px, hud2, spec.letter, spec.color);
+        (0, grid_1.putBar)(grid, px + 1, hud2, 5, left / spec.duration, spec.color, theme.barFull, theme.barEmpty);
+        px += 8;
+    }
+    const move = `${theme.left}/${theme.right}`;
+    (0, grid_1.putText)(grid, 0, boxBottom + 3, opts.mouse
+        ? `move ${move}/mouse  fire SPACE/click  bomb B/middle  pause P  quit Q`
+        : `move ${move}  fire SPACE  bomb B  pause P  quit Q`, "dim");
     // ---- side panel: what Claude is actually doing -------------------------
     if (showPanel) {
         const px0 = boxWidth + 1;
-        putText(grid, px0, boxTop, "CLAUDE'S WORK", "bold");
-        const lines = engine.log.slice(-(engine.height - 1)).reverse();
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
+        (0, grid_1.putText)(grid, px0, boxTop, "CLAUDE'S WORK", "bold");
+        const log = engine.log.slice(-(engine.height - 1)).reverse();
+        for (let i = 0; i < log.length; i++) {
+            const line = log[i];
             if (!line)
                 continue;
             const y = fieldTop + i;
             if (y >= boxBottom)
                 break;
-            putText(grid, px0, y, line.text.slice(0, PANEL_WIDTH), line.color || "white");
+            (0, grid_1.putText)(grid, px0, y, (0, grid_1.clip)(line.text, PANEL_WIDTH), line.color || "white");
         }
     }
-    return serialize(grid, opts.columns, opts.rows);
+    return (0, grid_1.serialize)(grid, opts.columns, opts.rows);
 }
-function arrowHint(ascii) {
-    return ascii ? "A/D" : "←/→";
+function drawEnemy(e, theme, field, fieldText) {
+    const hurt = e.hitFlash > 0;
+    const spec = content_1.ENEMY_SPECS[e.type];
+    if (e.boss) {
+        const color = hurt ? "white" : e.hp < e.maxHp / 2 && Math.floor(e.age * 6) % 2 === 0 ? "yellow" : e.boss.spec.color;
+        fieldText(e.x - 3, e.y, e.boss.spec.sprite[0], color);
+        fieldText(e.x - 3, e.y + 1, e.boss.spec.sprite[1], color);
+        return;
+    }
+    const glyph = enemyGlyph(theme, e);
+    const width = [...glyph].length;
+    fieldText(e.x - Math.floor(width / 2), e.y, glyph, hurt ? "white" : spec.color);
+    // Damaged multi-hit enemies carry a pip so you can see what is nearly dead.
+    if (e.maxHp > 1 && e.hp < e.maxHp)
+        field(e.x + Math.ceil(width / 2), e.y, String(Math.min(9, e.hp)), "dim");
+}
+function overlayLines(engine, opts) {
+    const s = engine.stats;
+    if (engine.status === "attention") {
+        return [
+            { text: "CLAUDE NEEDS YOU", color: "yellow" },
+            { text: engine.attentionNote.slice(0, engine.width - 4), color: "white" },
+            { text: "", color: "" },
+            { text: "switch to Claude, then press P here", color: "dim" },
+        ];
+    }
+    if (engine.status === "paused") {
+        return [
+            { text: "PAUSED", color: "cyan" },
+            { text: `score ${engine.score}  wave ${engine.wave}  kills ${s.kills}`, color: "white" },
+            { text: "", color: "" },
+            { text: "P resume   M menu   Q quit", color: "dim" },
+        ];
+    }
+    if (engine.status !== "gameover")
+        return null;
+    const sum = opts.summary;
+    const lines = [{ text: "GAME OVER", color: "red" }];
+    const best = engine.score > opts.highScore && engine.score > 0;
+    lines.push({ text: `score ${engine.score}`, color: "white" });
+    if (best)
+        lines.push({ text: "NEW HIGH SCORE", color: "yellow" });
+    else if (sum && sum.rank > 0)
+        lines.push({ text: `#${sum.rank} on the ${engine.mode.name} board`, color: "cyan" });
+    else
+        lines.push({ text: `best ${opts.highScore}`, color: "dim" });
+    if (sum?.newDailyBest)
+        lines.push({ text: "today's best daily run", color: "magenta" });
+    const accuracy = s.shots > 0 ? Math.round((s.hits / s.shots) * 100) : 0;
+    lines.push({ text: `wave ${engine.wave}  kills ${s.kills}  combo ${s.maxCombo}  aim ${accuracy}%`, color: "dim" });
+    if (sum) {
+        lines.push({ text: `+${sum.xpGained} XP`, color: "green" });
+        if (sum.levelAfter > sum.levelBefore)
+            lines.push({ text: `LEVEL UP! now level ${sum.levelAfter}`, color: "yellow" });
+        for (const name of sum.achievements.slice(0, 3))
+            lines.push({ text: `* ${name}`, color: "yellow" });
+        if (sum.achievements.length > 3)
+            lines.push({ text: `and ${sum.achievements.length - 3} more`, color: "yellow" });
+    }
+    lines.push({ text: "", color: "" });
+    lines.push({ text: "R again   M menu   Q quit", color: "dim" });
+    return lines;
 }
 function putSeg(grid, x, y, label, value, color) {
-    putText(grid, x, y, label, "dim");
-    putText(grid, x + label.length + 1, y, value, color);
+    (0, grid_1.putText)(grid, x, y, label, "dim");
+    (0, grid_1.putText)(grid, x + label.length + 1, y, value, color);
     return x + label.length + value.length + 3;
-}
-function putTimer(grid, x, y, theme, label, remaining, max, color) {
-    if (remaining <= 0)
-        return x;
-    putText(grid, x, y, label, "dim");
-    const barX = x + label.length + 1;
-    const width = 8;
-    const filled = Math.max(0, Math.min(width, Math.round((remaining / max) * width)));
-    for (let i = 0; i < width; i++) {
-        put(grid, barX + i, y, i < filled ? theme.barFull : theme.barEmpty, i < filled ? color : "dim");
-    }
-    return barX + width + 2;
 }
 function overlay(grid, fieldTop, fieldHeight, boxWidth, lines) {
     const innerWidth = boxWidth - 2;
-    const startY = fieldTop + Math.max(0, Math.floor((fieldHeight - lines.length) / 2) - 1);
-    // Dim the playfield behind the message so the text stays readable.
+    const startY = fieldTop + Math.max(1, Math.floor((fieldHeight - lines.length) / 2) - 1);
+    // Blank the playfield behind the message so the text stays readable.
     for (let i = -1; i <= lines.length; i++) {
         const y = startY + i;
+        if (y < fieldTop || y >= fieldTop + fieldHeight)
+            continue;
         for (let x = 1; x <= innerWidth; x++)
-            put(grid, x, y, " ", "");
+            (0, grid_1.put)(grid, x, y, " ", "");
     }
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         if (!line || !line.text)
             continue;
-        const x = 1 + Math.max(0, Math.floor((innerWidth - line.text.length) / 2));
-        putText(grid, x, startY + i, line.text, line.color);
+        if (startY + i >= fieldTop + fieldHeight)
+            break;
+        (0, grid_1.putCentered)(grid, startY + i, line.text, line.color, 1, innerWidth);
     }
 }

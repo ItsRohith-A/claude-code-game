@@ -11,13 +11,18 @@ export type GameEventKind =
   | "session_start"   // new run
   | "turn_start"      // user submitted a prompt: a wave begins
   | "bug"             // code was changed: spawn a bug
+  | "splitter"        // a file was written: an enemy that splits in two
   | "scout"           // Claude read/searched: weak fast enemy
+  | "diver"           // Claude ran a command: an enemy that hunts the ship
   | "probe"           // Claude hit the network: tougher, shoots back
+  | "carrier"         // Claude started a subagent: a mini boss that launches scouts
   | "powerup"         // a command succeeded (tests passed): drop a pickup
   | "damage"          // a tool failed: you take a hit
   | "attention"       // Claude needs the human: pause the game
   | "resume"          // attention cleared
   | "wave_clear"      // Claude finished the turn
+  | "ally"            // a subagent finished: a wingman joins you
+  | "supply"          // the context was compacted: a free bomb
   | "session_end";
 
 export interface GameEvent {
@@ -43,10 +48,19 @@ export interface GameState {
   wave: number;
   combo: number;
   enemies: number;
-  status: "playing" | "paused" | "attention" | "gameover" | "detached";
+  status: "menu" | "playing" | "paused" | "attention" | "gameover" | "detached";
   /** Epoch ms of the last frame, so the HUD can tell a live game from a dead one. */
   heartbeat: number;
   pid: number;
+  /** Added in 0.3; optional so an older game pane still renders. */
+  mode?: string;
+  level?: number;
+  bombs?: number;
+  fever?: boolean;
+  /** Name of the boss on screen, if any. */
+  boss?: string;
+  difficulty?: string;
+  maxLives?: number;
 }
 
 export const MAX_LIVES = 3;
@@ -68,9 +82,12 @@ export function classifyTool(toolName: string, failed: boolean): {
   switch (toolName) {
     // Changing code is what creates bugs to shoot.
     case "Edit":
-    case "Write":
     case "NotebookEdit":
       return { kind: "bug", weight: 2 };
+
+    // A whole new file: one enemy that breaks into two when shot.
+    case "Write":
+      return { kind: "splitter", weight: 1 };
 
     // Looking around is cheap: fast, flimsy enemies worth a few points.
     case "Read":
@@ -92,9 +109,11 @@ export function classifyTool(toolName: string, failed: boolean): {
     // Agents and tasks are a mini boss.
     case "Agent":
     case "Task":
-      return { kind: "probe", weight: 3 };
+      return { kind: "carrier", weight: 1 };
 
     default:
+      // MCP servers reach outside the machine too.
+      if (toolName.startsWith("mcp__")) return { kind: "probe", weight: 1 };
       return { kind: "scout", weight: 1 };
   }
 }
@@ -166,7 +185,7 @@ export function isVerificationCommand(command: string): boolean {
  * A short, screen-friendly label for the thing Claude just touched. The event
  * log sits on disk, so it keeps only what is safe to keep: file names, the
  * program a command ran, and the host of a URL. Never query strings, search
- * terms, or command arguments, which is where secrets live.
+ * terms or patterns, or command arguments, which is where secrets live.
  */
 export function labelFor(toolInput: Record<string, unknown> | undefined): string | undefined {
   const input = toolInput ?? {};
@@ -194,9 +213,6 @@ export function labelFor(toolInput: Record<string, unknown> | undefined): string
       return undefined;
     }
   }
-
-  const pattern = input["pattern"];
-  if (typeof pattern === "string" && pattern) return pattern.slice(0, 24);
 
   return undefined;
 }

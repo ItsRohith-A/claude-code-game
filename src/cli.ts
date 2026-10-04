@@ -191,11 +191,22 @@ function hasCommand(name: string): boolean {
   return result.status === 0;
 }
 
+/** Flags `launch` and `play` pass through to the game unchanged. */
+function passThrough(argv: string[]): string[] {
+  const out: string[] = [];
+  for (const flag of ["--ascii", "--no-mouse", "--bell"]) if (argv.includes(flag)) out.push(flag);
+  const mode = argv.indexOf("--mode");
+  const value = mode !== -1 ? argv[mode + 1] : undefined;
+  if (value && /^(storm|endless|zen|daily)$/.test(value)) out.push("--mode", value);
+  const level = argv.indexOf("--difficulty");
+  const choice = level !== -1 ? argv[level + 1] : undefined;
+  if (choice && /^(easy|medium|hard)$/.test(choice)) out.push("--difficulty", choice);
+  return out;
+}
+
 function launch(argv: string[]): number {
   const session = resolveSession(argv);
-  const gameArgs = session ? ["--session", session] : [];
-  if (argv.includes("--ascii")) gameArgs.push("--ascii");
-  if (argv.includes("--no-mouse")) gameArgs.push("--no-mouse");
+  const gameArgs = [...(session ? ["--session", session] : []), ...passThrough(argv)];
 
   const used = launchers(gameArgs).find((launcher) => launcher.run());
   if (!used) {
@@ -207,7 +218,7 @@ function launch(argv: string[]): number {
   console.log(`TOOLSTORM launched (${used.name}).`);
   if (session) console.log(`Attached to session ${session.slice(0, 8)} - your tool calls feed it.`);
   else console.log("No Claude session found yet; it will run standalone.");
-  console.log("Controls: mouse or arrows/A/D move, click or SPACE fires, P pauses, Q quits.");
+  console.log("Controls: mouse or arrows/A/D move, click or SPACE fires, B bombs, P pauses, Q quits.");
   return 0;
 }
 
@@ -397,18 +408,26 @@ async function simulate(argv: string[]): Promise<number> {
     ["turn_start", {}],
     ["scout", { tool: "Read", label: "auth.ts" }],
     ["bug", { tool: "Edit", label: "auth.ts", weight: 2 }],
-    ["scout", { tool: "Grep", label: "verifyToken" }],
+    ["scout", { tool: "Grep" }],
+    ["diver", { tool: "Bash", label: "git status" }],
     ["powerup", { tool: "Bash", label: "npm test" }],
-    ["bug", { tool: "Write", label: "session.ts", weight: 2 }],
-    ["probe", { tool: "WebFetch", label: "docs" }],
+    ["splitter", { tool: "Write", label: "session.ts" }],
+    ["probe", { tool: "WebFetch", label: "docs.example.com" }],
     ["damage", { tool: "Bash", label: "npm test" }],
-    ["scout", { tool: "Glob", label: "**/*.ts" }],
+    ["scout", { tool: "Glob" }],
     ["powerup", { tool: "Bash", label: "npm run build" }],
     ["wave_clear", {}],
   ];
+  // Every few rounds, a subagent and a compaction, to show the rarer events.
+  const extras: Array<[string, Record<string, unknown>]> = [
+    ["carrier", { tool: "Agent" }],
+    ["ally", { label: "a subagent reported back" }],
+    ["supply", { label: "context compacted" }],
+  ];
 
   for (let round = 0; round < 50; round++) {
-    for (const [kind, payload] of script) {
+    const steps = round % 3 === 2 ? [...script.slice(0, -1), ...extras, ...script.slice(-1)] : script;
+    for (const [kind, payload] of steps) {
       publish(session, { kind: kind as never, ...payload });
       await sleep(1200 + Math.random() * 1200);
     }
@@ -425,6 +444,8 @@ function sleep(ms: number): Promise<void> {
 function usage(): void {
   console.log("TOOLSTORM - a terminal arcade fueled by Claude Code's tool calls\n");
   console.log("  node dist/cli.js launch              open the game beside Claude");
+  console.log("        [--mode storm|endless|zen|daily] [--difficulty easy|medium|hard]");
+  console.log("        [--ascii] [--no-mouse] [--bell]");
   console.log("  node dist/cli.js play                run the game in this terminal");
   console.log("  node dist/cli.js install-statusline  add the score HUD to settings.json");
   console.log("  node dist/cli.js remove-statusline   undo that");
@@ -443,9 +464,7 @@ async function main(): Promise<void> {
     case "play": {
       // Hand this terminal straight to the game.
       const session = resolveSession(argv);
-      const args = [GAME_ENTRY, ...(session ? ["--session", session] : [])];
-      if (argv.includes("--ascii")) args.push("--ascii");
-      if (argv.includes("--no-mouse")) args.push("--no-mouse");
+      const args = [GAME_ENTRY, ...(session ? ["--session", session] : []), ...passThrough(argv)];
       const child = spawn(process.execPath, args, { stdio: "inherit" });
       child.on("exit", (code) => process.exit(code ?? 0));
       break;

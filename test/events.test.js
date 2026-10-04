@@ -54,7 +54,9 @@ test("labels keep nothing that could be a secret", () => {
   assert.equal(labelFor({ command: "curl -H 'Authorization: x' https://a.io" }), "curl");
   assert.equal(labelFor({ url: "https://api.example.com/v1?key=sk-live-123456" }), "api.example.com");
   assert.equal(labelFor({ query: "my private search" }), undefined);
-  assert.equal(labelFor({ pattern: "verifyToken" }), "verifyToken");
+  // A search pattern is a search term: it never reaches the log.
+  assert.equal(labelFor({ pattern: "verifyToken" }), undefined);
+  assert.equal(labelFor({ pattern: "TODO", path: "/repo/src" }), "src");
   assert.equal(labelFor(undefined), undefined);
 });
 
@@ -62,7 +64,10 @@ test("tool classification", () => {
   assert.deepEqual(classifyTool("Edit", false), { kind: "bug", weight: 2 });
   assert.deepEqual(classifyTool("Read", false), { kind: "scout", weight: 1 });
   assert.deepEqual(classifyTool("WebFetch", false), { kind: "probe", weight: 1 });
-  assert.deepEqual(classifyTool("Agent", false), { kind: "probe", weight: 3 });
+  assert.deepEqual(classifyTool("Write", false), { kind: "splitter", weight: 1 });
+  assert.deepEqual(classifyTool("Agent", false), { kind: "carrier", weight: 1 });
+  assert.deepEqual(classifyTool("mcp__github__create_issue", false), { kind: "probe", weight: 1 });
+  assert.deepEqual(classifyTool("TodoWrite", false), { kind: "scout", weight: 1 });
   assert.deepEqual(classifyTool("Edit", true), { kind: "damage", weight: 1 });
 });
 

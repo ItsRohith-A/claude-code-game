@@ -25,12 +25,13 @@ const ESC = "\x1b";
 export const MOUSE_ON = "\x1b[?1000h\x1b[?1003h\x1b[?1006h";
 export const MOUSE_OFF = "\x1b[?1006l\x1b[?1003l\x1b[?1000l";
 
-/** One decoded input. Mouse columns are 1-based terminal columns. */
+/** One decoded input. Mouse columns and rows are 1-based terminal cells. */
 export type InputEvent =
   | { type: "command"; command: Command }
   | { type: "quit" }
-  | { type: "aim"; column: number }
-  | { type: "trigger"; held: boolean };
+  | { type: "aim"; column: number; row: number }
+  | { type: "trigger"; held: boolean }
+  | { type: "wheel"; down: boolean };
 
 /** `ESC [ < button ; column ; row M|m`, where `m` means released. */
 const SGR_MOUSE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
@@ -67,7 +68,7 @@ export function createDecoder(): (chunk: string) => InputEvent[] {
             continue;
           }
           i += match[0].length - 1;
-          out.push(...mouseEvents(Number(match[1]), Number(match[2]), match[4] === "M"));
+          out.push(...mouseEvents(Number(match[1]), Number(match[2]), Number(match[3]), match[4] === "M"));
           continue;
         }
 
@@ -87,7 +88,9 @@ export function createDecoder(): (chunk: string) => InputEvent[] {
           i += 2;
           if (code === "D") out.push({ type: "command", command: "left" });
           else if (code === "C") out.push({ type: "command", command: "right" });
-          else if (code === "A") out.push({ type: "command", command: "fire" });
+          // Up fires in a run and moves the cursor in a menu.
+          else if (code === "A") out.push({ type: "command", command: "up" });
+          else if (code === "B") out.push({ type: "command", command: "down" });
           continue;
         }
         continue;
@@ -105,10 +108,33 @@ export function createDecoder(): (chunk: string) => InputEvent[] {
           out.push({ type: "command", command: "right" });
           break;
         case " ":
+          out.push({ type: "command", command: "fire" });
+          break;
         case "w":
         case "W":
         case "k":
-          out.push({ type: "command", command: "fire" });
+          out.push({ type: "command", command: "up" });
+          break;
+        case "s":
+        case "S":
+        case "j":
+          out.push({ type: "command", command: "down" });
+          break;
+        case "\r":
+        case "\n":
+          out.push({ type: "command", command: "confirm" });
+          break;
+        case "b":
+        case "B":
+          out.push({ type: "command", command: "bomb" });
+          break;
+        case "m":
+        case "M":
+          out.push({ type: "command", command: "menu" });
+          break;
+        case "\x7f": // Backspace
+        case "\b":
+          out.push({ type: "command", command: "back" });
           break;
         case "p":
         case "P":
@@ -132,16 +158,18 @@ export function createDecoder(): (chunk: string) => InputEvent[] {
   };
 }
 
-function mouseEvents(code: number, column: number, pressed: boolean): InputEvent[] {
-  // The wheel scrolls nothing here: ignore it rather than read it as a click.
-  if (code & WHEEL) return [];
+function mouseEvents(code: number, column: number, row: number, pressed: boolean): InputEvent[] {
+  // The wheel scrolls menus; it is never read as a click.
+  if (code & WHEEL) return pressed ? [{ type: "wheel", down: (code & 1) === 1 }] : [];
   const button = code & 3;
   const moved = (code & MOTION) !== 0;
-  const out: InputEvent[] = [{ type: "aim", column }];
+  const out: InputEvent[] = [{ type: "aim", column, row }];
 
   if (moved) return out;
   if (button === 0) out.push({ type: "trigger", held: pressed });
-  // Right click pauses; on release only, so one click is one toggle.
+  // Middle click drops a bomb; right click pauses. Both on release only, so
+  // one click is one action.
+  else if (button === 1 && !pressed) out.push({ type: "command", command: "bomb" });
   else if (button === 2 && !pressed) out.push({ type: "command", command: "pause" });
   // SGR reports every release as button 3 in some terminals: let go of fire.
   else if (button === 3 && !pressed) out.push({ type: "trigger", held: false });
@@ -149,18 +177,15 @@ function mouseEvents(code: number, column: number, pressed: boolean): InputEvent
 }
 
 export interface InputHandler {
-  /** Commands collected since the last drain, in arrival order. */
-  drain(): Command[];
-  /** The last terminal column the pointer was in, once it has moved. */
-  aim(): number | null;
+  /** Everything decoded since the last drain, in arrival order. */
+  drain(): InputEvent[];
   /** Whether the left mouse button is down. */
   firing(): boolean;
   stop(): void;
 }
 
 export function startInput(onQuit: () => void, mouse: boolean): InputHandler {
-  let queue: Command[] = [];
-  let aimColumn: number | null = null;
+  let queue: InputEvent[] = [];
   let held = false;
   const decode = createDecoder();
   const stdin = process.stdin;
@@ -172,32 +197,23 @@ export function startInput(onQuit: () => void, mouse: boolean): InputHandler {
 
   const onData = (chunk: string): void => {
     for (const event of decode(chunk)) {
-      switch (event.type) {
-        case "command":
-          queue.push(event.command);
-          break;
-        case "aim":
-          aimColumn = event.column;
-          break;
-        case "trigger":
-          held = event.held;
-          break;
-        case "quit":
-          onQuit();
-          return;
+      if (event.type === "quit") {
+        onQuit();
+        return;
       }
+      if (event.type === "trigger") held = event.held;
+      queue.push(event);
     }
   };
 
   stdin.on("data", onData);
 
   return {
-    drain(): Command[] {
+    drain(): InputEvent[] {
       const out = queue;
       queue = [];
       return out;
     },
-    aim: () => aimColumn,
     firing: () => held,
     stop(): void {
       stdin.off("data", onData);

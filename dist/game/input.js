@@ -57,7 +57,7 @@ function createDecoder() {
                         continue;
                     }
                     i += match[0].length - 1;
-                    out.push(...mouseEvents(Number(match[1]), Number(match[2]), match[4] === "M"));
+                    out.push(...mouseEvents(Number(match[1]), Number(match[2]), Number(match[3]), match[4] === "M"));
                     continue;
                 }
                 // A read can end right after ESC: keep it for the next one.
@@ -77,8 +77,11 @@ function createDecoder() {
                         out.push({ type: "command", command: "left" });
                     else if (code === "C")
                         out.push({ type: "command", command: "right" });
+                    // Up fires in a run and moves the cursor in a menu.
                     else if (code === "A")
-                        out.push({ type: "command", command: "fire" });
+                        out.push({ type: "command", command: "up" });
+                    else if (code === "B")
+                        out.push({ type: "command", command: "down" });
                     continue;
                 }
                 continue;
@@ -95,10 +98,33 @@ function createDecoder() {
                     out.push({ type: "command", command: "right" });
                     break;
                 case " ":
+                    out.push({ type: "command", command: "fire" });
+                    break;
                 case "w":
                 case "W":
                 case "k":
-                    out.push({ type: "command", command: "fire" });
+                    out.push({ type: "command", command: "up" });
+                    break;
+                case "s":
+                case "S":
+                case "j":
+                    out.push({ type: "command", command: "down" });
+                    break;
+                case "\r":
+                case "\n":
+                    out.push({ type: "command", command: "confirm" });
+                    break;
+                case "b":
+                case "B":
+                    out.push({ type: "command", command: "bomb" });
+                    break;
+                case "m":
+                case "M":
+                    out.push({ type: "command", command: "menu" });
+                    break;
+                case "\x7f": // Backspace
+                case "\b":
+                    out.push({ type: "command", command: "back" });
                     break;
                 case "p":
                 case "P":
@@ -121,18 +147,21 @@ function createDecoder() {
         return out;
     };
 }
-function mouseEvents(code, column, pressed) {
-    // The wheel scrolls nothing here: ignore it rather than read it as a click.
+function mouseEvents(code, column, row, pressed) {
+    // The wheel scrolls menus; it is never read as a click.
     if (code & WHEEL)
-        return [];
+        return pressed ? [{ type: "wheel", down: (code & 1) === 1 }] : [];
     const button = code & 3;
     const moved = (code & MOTION) !== 0;
-    const out = [{ type: "aim", column }];
+    const out = [{ type: "aim", column, row }];
     if (moved)
         return out;
     if (button === 0)
         out.push({ type: "trigger", held: pressed });
-    // Right click pauses; on release only, so one click is one toggle.
+    // Middle click drops a bomb; right click pauses. Both on release only, so
+    // one click is one action.
+    else if (button === 1 && !pressed)
+        out.push({ type: "command", command: "bomb" });
     else if (button === 2 && !pressed)
         out.push({ type: "command", command: "pause" });
     // SGR reports every release as button 3 in some terminals: let go of fire.
@@ -142,7 +171,6 @@ function mouseEvents(code, column, pressed) {
 }
 function startInput(onQuit, mouse) {
     let queue = [];
-    let aimColumn = null;
     let held = false;
     const decode = createDecoder();
     const stdin = process.stdin;
@@ -154,20 +182,13 @@ function startInput(onQuit, mouse) {
         process.stdout.write(exports.MOUSE_ON);
     const onData = (chunk) => {
         for (const event of decode(chunk)) {
-            switch (event.type) {
-                case "command":
-                    queue.push(event.command);
-                    break;
-                case "aim":
-                    aimColumn = event.column;
-                    break;
-                case "trigger":
-                    held = event.held;
-                    break;
-                case "quit":
-                    onQuit();
-                    return;
+            if (event.type === "quit") {
+                onQuit();
+                return;
             }
+            if (event.type === "trigger")
+                held = event.held;
+            queue.push(event);
         }
     };
     stdin.on("data", onData);
@@ -177,7 +198,6 @@ function startInput(onQuit, mouse) {
             queue = [];
             return out;
         },
-        aim: () => aimColumn,
         firing: () => held,
         stop() {
             stdin.off("data", onData);

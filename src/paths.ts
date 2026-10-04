@@ -32,6 +32,11 @@ export function highScorePath(): string {
   return path.join(rootDir(), "highscore.json");
 }
 
+/** Level, totals, achievements, leaderboards and the chosen ship. */
+export function profilePath(): string {
+  return path.join(rootDir(), "profile.json");
+}
+
 /**
  * Where the plugin's current dist/ lives. Hooks refresh it on every session
  * start, because the plugin root is a versioned directory that an update

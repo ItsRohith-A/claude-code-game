@@ -120,9 +120,11 @@ function contextBar(percent) {
     const color = percent >= 90 ? C.red : percent >= 70 ? C.yellow : C.green;
     return paint("█".repeat(filled), color) + paint("░".repeat(width - filled), C.dim);
 }
-function hearts(lives) {
+function hearts(lives, max = events_1.MAX_LIVES) {
     let out = "";
-    for (let i = 0; i < events_1.MAX_LIVES; i++) {
+    // The state file is only trusted so far: never draw a row of a thousand hearts.
+    const slots = Math.max(1, Math.min(5, Math.floor(max) || events_1.MAX_LIVES));
+    for (let i = 0; i < slots; i++) {
         out += i < lives ? paint("♥", C.red) : paint("♡", C.dim);
     }
     return out;
@@ -139,6 +141,19 @@ function gameRow(state) {
         return `${tag} ${paint(`paused — score ${state.score}, best ${state.highScore} — /toolstorm to resume`, C.dim)}`;
     }
     const parts = [tag];
+    const level = typeof state.level === "number" ? paint(`lvl ${state.level}`, C.cyan) : null;
+    if (state.status === "menu") {
+        parts.push(paint("on the title screen", C.dim));
+        if (level)
+            parts.push(level);
+        if (state.highScore > 0)
+            parts.push(paint(`best ${state.highScore}`, C.dim));
+        return parts.join(paint(" │ ", C.dim));
+    }
+    if (state.mode) {
+        const hard = state.difficulty && state.difficulty !== "MEDIUM";
+        parts.push(paint(hard ? `${state.mode} ${state.difficulty}` : state.mode, C.yellow));
+    }
     if (state.status === "gameover") {
         parts.push(paint("GAME OVER", C.red));
         parts.push(paint(`score ${state.score}`, C.white));
@@ -154,16 +169,27 @@ function gameRow(state) {
     }
     parts.push(paint(String(state.score).padStart(6, "0"), C.white));
     parts.push(`${paint("wave", C.dim)} ${paint(String(state.wave), C.cyan)}`);
-    parts.push(hearts(state.lives));
-    if (state.enemies > 0) {
+    parts.push(state.mode === "ZEN" ? paint("zen", C.green) : hearts(state.lives, state.maxLives));
+    if (typeof state.bombs === "number" && state.bombs > 0) {
+        parts.push(paint("✹".repeat(state.bombs), C.red));
+    }
+    if (state.boss) {
+        parts.push(paint(`BOSS ${state.boss}`, C.red));
+    }
+    else if (state.enemies > 0) {
         parts.push(paint(`${state.enemies} on screen`, C.dim));
     }
-    if (state.combo >= 2) {
+    if (state.fever) {
+        parts.push(paint("FEVER x2", C.magenta));
+    }
+    else if (state.combo >= 2) {
         parts.push(paint(`combo x${state.combo}`, C.yellow));
     }
     if (state.score >= state.highScore && state.score > 0) {
         parts.push(paint("NEW BEST", C.magenta));
     }
+    if (level)
+        parts.push(level);
     return parts.join(paint(" │ ", C.dim));
 }
 function infoRow(input) {

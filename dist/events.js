@@ -60,9 +60,11 @@ function classifyTool(toolName, failed) {
     switch (toolName) {
         // Changing code is what creates bugs to shoot.
         case "Edit":
-        case "Write":
         case "NotebookEdit":
             return { kind: "bug", weight: 2 };
+        // A whole new file: one enemy that breaks into two when shot.
+        case "Write":
+            return { kind: "splitter", weight: 1 };
         // Looking around is cheap: fast, flimsy enemies worth a few points.
         case "Read":
         case "Grep":
@@ -80,8 +82,11 @@ function classifyTool(toolName, failed) {
         // Agents and tasks are a mini boss.
         case "Agent":
         case "Task":
-            return { kind: "probe", weight: 3 };
+            return { kind: "carrier", weight: 1 };
         default:
+            // MCP servers reach outside the machine too.
+            if (toolName.startsWith("mcp__"))
+                return { kind: "probe", weight: 1 };
             return { kind: "scout", weight: 1 };
     }
 }
@@ -147,7 +152,7 @@ function isVerificationCommand(command) {
  * A short, screen-friendly label for the thing Claude just touched. The event
  * log sits on disk, so it keeps only what is safe to keep: file names, the
  * program a command ran, and the host of a URL. Never query strings, search
- * terms, or command arguments, which is where secrets live.
+ * terms or patterns, or command arguments, which is where secrets live.
  */
 function labelFor(toolInput) {
     const input = toolInput ?? {};
@@ -175,8 +180,5 @@ function labelFor(toolInput) {
             return undefined;
         }
     }
-    const pattern = input["pattern"];
-    if (typeof pattern === "string" && pattern)
-        return pattern.slice(0, 24);
     return undefined;
 }

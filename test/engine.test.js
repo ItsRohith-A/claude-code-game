@@ -37,10 +37,10 @@ test("a turn ending always clears the banner", () => {
 
 test("a shield absorbs one hit, then lives run out into game over", () => {
   const engine = new Engine(40, 20);
-  engine.shieldTime = 5;
+  engine.timers.shield = 5;
   engine.ingest({ kind: "damage", at, tool: "Bash" });
   assert.equal(engine.lives, 3);
-  assert.equal(engine.shieldTime, 0);
+  assert.equal(engine.timers.shield, 0);
 
   for (let i = 0; i < 3; i++) {
     engine.invulnTime = 0;
@@ -48,11 +48,6 @@ test("a shield absorbs one hit, then lives run out into game over", () => {
   }
   assert.equal(engine.lives, 0);
   assert.equal(engine.status, "gameover");
-
-  engine.apply("restart");
-  assert.equal(engine.status, "playing");
-  assert.equal(engine.lives, 3);
-  assert.equal(engine.score, 0);
 });
 
 test("movement uses MOVE_STEP and stays on the field", () => {

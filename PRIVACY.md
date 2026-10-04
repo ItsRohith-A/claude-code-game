@@ -1,6 +1,6 @@
 # TOOLSTORM privacy policy
 
-_Last updated: 2 October 2026_
+_Last updated: 3 October 2026_
 
 TOOLSTORM is a game that runs on your own computer, inside your terminal, next
 to Claude Code. This page explains what it reads, what it writes, and what it
@@ -33,8 +33,9 @@ account:
 
 | File | Contents |
 | --- | --- |
-| Session event logs | Game events: the tool name, plus a short label — a file name (`auth.ts`), the program a command ran (`npm test`, never its arguments), or a website's host name. Never file contents, query strings, search terms or command arguments. |
-| Game state | Score, wave and lives, for the scoreboard. |
+| Session event logs | Game events: the tool name, plus a short label — a file name (`auth.ts`), the program a command ran (`npm test`, never its arguments), or a website's host name. Never file contents, query strings, search terms or patterns, or command arguments. |
+| Game state | Score, wave, lives, bombs, mode and level, for the scoreboard. |
+| Profile | Your level and experience points, totals such as runs played and enemies destroyed, unlocked trophies, your top ten scores per mode with their dates, daily bests and your chosen ship. |
 | High score | Your best score. |
 | Scoreboard backups | Only if you install the scoreboard: your previous status line, and a copy of your settings file from before the change, so it can be restored. |
 

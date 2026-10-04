@@ -1,6 +1,6 @@
 {
   "name": "toolstorm",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
   "description": "TOOLSTORM - a terminal arcade shooter fueled by Claude Code's tool calls",
   "license": "MIT",

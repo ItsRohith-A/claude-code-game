@@ -1,7 +1,7 @@
 ---
 name: toolstorm
-description: Launch TOOLSTORM, the arcade game fed by this session's tool calls, or install/remove its status-line HUD.
-argument-hint: "[install | remove | status]"
+description: Launch TOOLSTORM, the arcade game fed by this session's tool calls, straight into a mode, or install/remove its status-line HUD.
+argument-hint: "[endless | zen | daily | easy | medium | hard | install | remove | status]"
 disable-model-invocation: true
 ---
 
@@ -23,7 +23,21 @@ node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" launch --session "${CLAUDE_SESSION_ID}"
 ```
 
 This splits the current pane (tmux, zellij, WezTerm, kitty, iTerm, Windows
-Terminal) or opens a new window.
+Terminal) or opens a new window, on the title menu.
+
+## `storm`, `endless`, `zen` or `daily` — skip the menu
+
+Launch as above, adding `--mode` and the argument exactly as given, e.g.:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" launch --session "${CLAUDE_SESSION_ID}" --mode endless
+```
+
+## `easy`, `medium` or `hard` — set the difficulty and launch
+
+Launch as above, adding `--difficulty` and the argument exactly as given. The
+choice is saved for later runs too. A mode and a difficulty can be combined,
+e.g. `endless hard` becomes `--mode endless --difficulty hard`.
 
 If the launcher cannot find a terminal, tell the user to run this themselves in
 a spare pane:
@@ -65,6 +79,6 @@ node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" status --session "${CLAUDE_SESSION_ID}"
 ## Controls to pass on
 
 The ship follows the mouse, and holding the left button fires; arrows or
-`A`/`D` and `SPACE` work too. Right click or `P` pauses, `Q` quits, `R`
-restarts after a game over. Add `--no-mouse` to the launch command for
-keyboard only.
+`A`/`D` and `SPACE` work too. `B` or a middle click drops a bomb. Right click
+or `P` pauses, `M` returns to the menu, `Q` quits, `R` restarts after a game
+over. Add `--no-mouse` to the launch command for keyboard only.
